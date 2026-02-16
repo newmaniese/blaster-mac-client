@@ -131,3 +131,46 @@ events:
 def test_load_missing_file_raises() -> None:
     with pytest.raises(FileNotFoundError):
         Config.load("/nonexistent/config.yaml")
+
+def test_negative_delay_validation() -> None:
+    """Ensure that negative Delay raises ValueError."""
+    data = {
+        "events": {
+            "OnConnect": {"NamedCommand": "On", "Delay": -5},
+        }
+    }
+    with pytest.raises(ValueError, match="Delay must be a non-negative integer"):
+        Config.from_dict(data)
+
+
+def test_negative_heartbeat_interval_validation() -> None:
+    """Ensure that negative HeartbeatInterval raises ValueError."""
+    data = {
+        "events": {
+            "HeartbeatStopped": {"NamedCommand": "Off", "HeartbeatInterval": -60},
+        }
+    }
+    with pytest.raises(ValueError, match="HeartbeatInterval must be a non-negative integer"):
+        Config.from_dict(data)
+
+
+def test_invalid_type_delay() -> None:
+    """Ensure that non-integer Delay raises ValueError."""
+    data = {
+        "events": {
+            "OnConnect": {"NamedCommand": "On", "Delay": "invalid"},
+        }
+    }
+    with pytest.raises(ValueError, match="Delay must be a non-negative integer"):
+        Config.from_dict(data)
+
+
+def test_invalid_type_heartbeat_interval() -> None:
+    """Ensure that non-integer HeartbeatInterval raises ValueError."""
+    data = {
+        "events": {
+            "HeartbeatStopped": {"NamedCommand": "Off", "HeartbeatInterval": "invalid"},
+        }
+    }
+    with pytest.raises(ValueError, match="HeartbeatInterval must be a non-negative integer"):
+        Config.from_dict(data)
