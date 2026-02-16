@@ -4,6 +4,7 @@ A macOS command-line app that monitors camera and microphone usage and sends IR 
 
 **License:** MIT — see [LICENSE](LICENSE).
 
+**Privacy:** The app runs entirely on your Mac. It reads local macOS logs for camera/mic state and talks only to your IR Blaster over BLE. No telemetry or external servers.
 
 ## How it works
 
