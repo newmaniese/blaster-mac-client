@@ -29,7 +29,8 @@ async def run() -> None:
         else 120
     )
     sm = AVStateMachine(idle_delay)
-    last_av_active: bool = get_initial_state()[0] or get_initial_state()[1]
+    initial_cam, initial_mic = get_initial_state()
+    last_av_active: bool = initial_cam or initial_mic
 
     async def try_reconnect() -> None:
         while True:
