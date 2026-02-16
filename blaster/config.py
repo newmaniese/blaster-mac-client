@@ -111,8 +111,4 @@ class Config:
 
 
 def _default_config_path() -> Path:
-    for candidate in (Path.cwd(), Path(__file__).resolve().parent.parent):
-        p = candidate / "config.yaml"
-        if p.is_file():
-            return p
-    return Path.cwd() / "config.yaml"
+    return Path(__file__).resolve().parent.parent / "config.yaml"

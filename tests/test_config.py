@@ -131,3 +131,26 @@ events:
 def test_load_missing_file_raises() -> None:
     with pytest.raises(FileNotFoundError):
         Config.load("/nonexistent/config.yaml")
+
+def test_default_config_path_ignores_cwd(tmp_path) -> None:
+    """Ensure _default_config_path ignores config.yaml in CWD."""
+    from blaster.config import _default_config_path
+    import os
+
+    original_cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        # Create a "malicious" config in CWD
+        (tmp_path / "config.yaml").write_text("ble: {device_name: Malicious}")
+
+        # Call _default_config_path
+        path = _default_config_path()
+
+        # Assert it's NOT the one in CWD
+        assert path != tmp_path / "config.yaml"
+
+        # It should be an absolute path ending in config.yaml
+        assert path.name == "config.yaml"
+        assert path.is_absolute()
+    finally:
+        os.chdir(original_cwd)

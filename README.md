@@ -82,6 +82,12 @@ From the project root with the venv activated:
 python -m blaster
 ```
 
+You can optionally specify a custom configuration file:
+
+```bash
+python -m blaster --config /path/to/myconfig.yaml
+```
+
 - The app scans for the device named **IR Blaster**, connects, sends **On** (optionally after a short delay), arms the ESP32 to run **Off** after a configurable delay with no heartbeat, and starts sending heartbeats periodically.
 - When any app starts using the camera or microphone, the client sends the **Active** command (e.g. Red) by name.
 - When both camera and microphone have been idle for the configured cooldown, it sends the **Idle** command (e.g. Green) by name.
