@@ -1,0 +1,19 @@
+# Blaster Mac Client — IR Blaster BLE + camera/mic monitor
+ble:
+  device_name: "IR Blaster"
+
+events:
+  OnConnect:
+    - NamedCommand: "On"
+      Delay: 0              # seconds to wait after connect before sending (0 = immediately)
+    - NamedCommand: "Green"
+      Delay: 2               # then send Green 2 seconds after connect
+  HeartbeatStopped:         # first entry: schedule + HeartbeatInterval
+    - NamedCommand: "Off"
+      Delay: 45             # seconds without heartbeat before ESP32 runs this command
+      HeartbeatInterval: 60 # how often (seconds) the client sends a heartbeat
+  Active:                   # camera or microphone turned on
+    - NamedCommand: "Red"
+  Idle:                     # first entry's Delay = cooldown before Idle; then run commands
+    - NamedCommand: "Green"
+      Delay: 10             # cooldown (seconds) before sending
