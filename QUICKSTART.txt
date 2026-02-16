@@ -1,0 +1,15 @@
+Blaster Mac Client — run on this Mac
+====================================
+
+1. Open Terminal (Applications → Utilities → Terminal).
+
+2. Go into the folder:
+   cd blaster-mac-client
+
+3. Run the app:
+   chmod +x run.sh && ./run.sh
+
+First run will install dependencies (one-time). Stop the app with Ctrl+C.
+
+Requirements: macOS with Bluetooth; IR Blaster powered, in range, and paired with this Mac.
+Optional: edit config.yaml to change device name or command names.

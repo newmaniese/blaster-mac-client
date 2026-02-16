@@ -148,12 +148,36 @@ pytest tests/ -v
 - **Command not found**  
   Command names in `config.yaml` (e.g. "Red", "Green", "On", "Off") must match the **name** of a saved code on the IR Blaster. Check the web UI or `GET /saved` for the exact names.
 
+## Packaging for another Mac (e.g. send via Teams)
+
+From the **parent** of `blaster-mac-client`, create a zip that excludes venv and git (keeps the file small):
+
+```bash
+cd /path/to/parent
+zip -r blaster-mac-client.zip blaster-mac-client \
+  -x "blaster-mac-client/.venv/*" \
+  -x "blaster-mac-client/.git/*" \
+  -x "blaster-mac-client/__pycache__/*" \
+  -x "blaster-mac-client/*/__pycache__/*" \
+  -x "blaster-mac-client/.pytest_cache/*"
+```
+
+Send `blaster-mac-client.zip` (e.g. via Teams). The zip includes **QUICKSTART.txt** with these steps for the recipient. On the other Mac:
+
+1. Unzip the file.
+2. Open Terminal, then: `cd blaster-mac-client`
+3. Run: `chmod +x run.sh && ./run.sh`
+
+The first run creates a virtualenv and installs dependencies; later runs start the app immediately. Stop with **Ctrl+C**.
+
 ## Project layout
 
 ```
 blaster-mac-client/
   config.yaml           # Device name, events (NamedCommand, Delay, HeartbeatInterval)
   requirements.txt
+  run.sh                # One-step run (creates venv if needed, then starts app)
+  QUICKSTART.txt        # Short instructions for someone running on another Mac
   blaster/
     __init__.py
     __main__.py         # Entry point (python -m blaster)
