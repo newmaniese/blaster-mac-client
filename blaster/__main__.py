@@ -3,9 +3,11 @@ Blaster Mac Client — entry point. Run with: python -m blaster
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
 import logging
 import sys
+from pathlib import Path
 
 from blaster.av_monitor import get_initial_state, stream_av_events
 from blaster.ble_client import IRBlasterBLE
@@ -20,8 +22,8 @@ logging.basicConfig(
 logger = logging.getLogger("blaster")
 
 
-async def run() -> None:
-    config = Config.load()
+async def run(config_path: Path | None = None) -> None:
+    config = Config.load(config_path)
     ble = IRBlasterBLE(config.ble)
     idle_delay = (
         config.events.Idle[0].Delay
@@ -168,8 +170,12 @@ async def run() -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Blaster Mac Client")
+    parser.add_argument("--config", type=Path, help="Path to config.yaml")
+    args = parser.parse_args()
+
     try:
-        asyncio.run(run())
+        asyncio.run(run(config_path=args.config))
     except KeyboardInterrupt:
         logger.info("Interrupted.")
         sys.exit(0)
