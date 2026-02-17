@@ -11,6 +11,7 @@ from blaster.av_monitor import get_initial_state, stream_av_events
 from blaster.ble_client import IRBlasterBLE
 from blaster.config import Config
 from blaster.state_machine import AVStateMachine
+from blaster.utils import execute_specs
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,14 +55,7 @@ async def run() -> None:
         logger.warning("%s", e)
     else:
         # On connect: run each command with its delay (in order).
-        for spec in config.events.OnConnect:
-            if spec.Delay and spec.Delay > 0:
-                await asyncio.sleep(spec.Delay)
-            try:
-                status = await ble.send_command_by_name(spec.NamedCommand)
-                logger.info("Sent %s (on connect) -> %s", spec.NamedCommand, status)
-            except Exception as e:
-                logger.warning("Send %s on connect failed: %s", spec.NamedCommand, e)
+        await execute_specs(ble, config.events.OnConnect, "on connect")
 
     hb0 = config.events.HeartbeatStopped[0] if config.events.HeartbeatStopped else None
     if hb0 is not None:
@@ -94,15 +88,7 @@ async def run() -> None:
     # Apply initial AV state (e.g. if cam/mic already on, send Active command)
     cmd = sm.update(last_av_active)
     if cmd is not None:
-        specs = getattr(config.events, cmd)
-        for spec in specs:
-            if spec.Delay and spec.Delay > 0:
-                await asyncio.sleep(spec.Delay)
-            try:
-                status = await ble.send_command_by_name(spec.NamedCommand)
-                logger.info("Sent %s (initial) -> %s", spec.NamedCommand, status)
-            except Exception as e:
-                logger.warning("Send %s (initial) failed: %s", spec.NamedCommand, e)
+        await execute_specs(ble, getattr(config.events, cmd), "initial")
 
     async def av_loop() -> None:
         nonlocal last_av_active
@@ -111,14 +97,7 @@ async def run() -> None:
                 last_av_active = cam or mic
                 cmd = sm.update(last_av_active)
                 if cmd is not None and ble.is_connected:
-                    for spec in getattr(config.events, cmd):
-                        if spec.Delay and spec.Delay > 0:
-                            await asyncio.sleep(spec.Delay)
-                        try:
-                            status = await ble.send_command_by_name(spec.NamedCommand)
-                            logger.info("Sent %s -> %s", spec.NamedCommand, status)
-                        except Exception as e:
-                            logger.warning("Send %s failed: %s", spec.NamedCommand, e)
+                    await execute_specs(ble, getattr(config.events, cmd))
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -129,14 +108,7 @@ async def run() -> None:
             await asyncio.sleep(1.0)
             cmd = sm.update(last_av_active)
             if cmd is not None and ble.is_connected:
-                for spec in getattr(config.events, cmd):
-                    if spec.Delay and spec.Delay > 0:
-                        await asyncio.sleep(spec.Delay)
-                    try:
-                        status = await ble.send_command_by_name(spec.NamedCommand)
-                        logger.info("Sent %s (cooldown) -> %s", spec.NamedCommand, status)
-                    except Exception as e:
-                        logger.warning("Send %s (cooldown) failed: %s", spec.NamedCommand, e)
+                await execute_specs(ble, getattr(config.events, cmd), "cooldown")
 
     av_task = asyncio.create_task(av_loop())
     tick_task = asyncio.create_task(tick_loop())
