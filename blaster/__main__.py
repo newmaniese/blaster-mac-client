@@ -33,41 +33,7 @@ async def run() -> None:
     initial_cam, initial_mic = get_initial_state()
     last_av_active: bool = initial_cam or initial_mic
 
-    async def try_reconnect() -> None:
-        while True:
-            await asyncio.sleep(5.0)
-            if ble.is_connected:
-                return
-            logger.info("Reconnecting to IR Blaster...")
-            if await ble.connect():
-                return
-
-    ble.set_disconnect_callback(try_reconnect)
-
-    logger.info("Connecting to IR Blaster...")
-    if not await ble.connect():
-        logger.error("Could not find or connect to IR Blaster. Ensure it is on and paired.")
-        sys.exit(1)
-
-    # Wait until the link has proper encryption (macOS may not be ready immediately after connect).
-    try:
-        await ble.wait_until_ready()
-    except TimeoutError as e:
-        logger.warning("%s", e)
-    else:
-        # On connect: run each command with its delay (in order).
-        await execute_specs(ble, config.events.OnConnect, "on connect")
-
     hb0 = config.events.HeartbeatStopped[0] if config.events.HeartbeatStopped else None
-    if hb0 is not None:
-        try:
-            await ble.schedule_disconnect_command(
-                hb0.NamedCommand,
-                hb0.Delay or 900,
-            )
-        except Exception as e:
-            logger.warning("Schedule disconnect command failed: %s", e)
-
     heartbeat_interval = (hb0.HeartbeatInterval if hb0 else None) or 60
     heartbeat_task: asyncio.Task[None] | None = None
 
@@ -81,8 +47,45 @@ async def run() -> None:
             except Exception as e:
                 logger.debug("Heartbeat failed: %s", e)
 
-    if heartbeat_interval > 0:
-        heartbeat_task = asyncio.create_task(heartbeat_loop())
+    async def run_after_connect() -> None:
+        """Run OnConnect events, schedule disconnect command, and start heartbeat. Call after every connect (initial and reconnect)."""
+        nonlocal heartbeat_task
+        try:
+            await ble.wait_until_ready()
+        except TimeoutError as e:
+            logger.warning("%s", e)
+            return
+        # On connect: run each command with its delay (in order).
+        await execute_specs(ble, config.events.OnConnect, "on connect")
+        if hb0 is not None:
+            try:
+                await ble.schedule_disconnect_command(
+                    hb0.NamedCommand,
+                    hb0.Delay or 900,
+                )
+            except Exception as e:
+                logger.warning("Schedule disconnect command failed: %s", e)
+        if heartbeat_interval > 0:
+            heartbeat_task = asyncio.create_task(heartbeat_loop())
+
+    async def try_reconnect() -> None:
+        while True:
+            await asyncio.sleep(5.0)
+            if ble.is_connected:
+                return
+            logger.info("Reconnecting to IR Blaster...")
+            if await ble.connect():
+                await run_after_connect()
+                return
+
+    ble.set_disconnect_callback(try_reconnect)
+
+    logger.info("Connecting to IR Blaster...")
+    if not await ble.connect():
+        logger.error("Could not find or connect to IR Blaster. Ensure it is on and paired.")
+        sys.exit(1)
+
+    await run_after_connect()
 
     logger.info("Connected. Monitoring camera/mic...")
 

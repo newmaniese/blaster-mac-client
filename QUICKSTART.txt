@@ -6,10 +6,15 @@ Blaster Mac Client — run on this Mac
 2. Go into the folder:
    cd blaster-mac-client
 
-3. Run the app:
+3. Run the app once (first run installs dependencies):
    chmod +x run.sh && ./run.sh
+   Stop with Ctrl+C when done testing.
 
-First run will install dependencies (one-time). Stop the app with Ctrl+C.
+4. Install to run at login (optional):
+   chmod +x install.sh && ./install.sh
+   The client will start automatically when you log in and restart if it crashes.
+   Logs: logs/stdout.log and logs/stderr.log
+   To disable: launchctl unload ~/Library/LaunchAgents/com.blaster-mac-client.plist
 
 Requirements: macOS with Bluetooth; IR Blaster powered, in range, and paired with this Mac.
 Optional: edit config.yaml to change device name or command names.

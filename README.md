@@ -89,6 +89,21 @@ python -m blaster
 
 Stop with **Ctrl+C**; the client disconnects cleanly.
 
+### Run at login (LaunchAgent)
+
+Quick installer — from the project root:
+
+```bash
+chmod +x install.sh && ./install.sh
+```
+
+This installs the LaunchAgent (using `com.blaster-mac-client.plist`), creates `logs/`, and loads the agent. The client will start at login and restart if it exits or crashes. Logs: `logs/stdout.log` and `logs/stderr.log`.
+
+- **Unload (stop and disable):** `launchctl unload ~/Library/LaunchAgents/com.blaster-mac-client.plist`
+- **Reload after config change:** unload then `launchctl load ~/Library/LaunchAgents/com.blaster-mac-client.plist`
+
+You can also run `./install-launchd.sh` (it calls `install.sh`).
+
 ## Configuration
 
 Edit `config.yaml` in the project root. All commands are specified by **name** (the client resolves names to indices using the device’s Saved Codes).
@@ -177,6 +192,8 @@ blaster-mac-client/
   config.yaml           # Device name, events (NamedCommand, Delay, HeartbeatInterval)
   requirements.txt
   run.sh                # One-step run (creates venv if needed, then starts app)
+  install.sh            # Light installer: install LaunchAgent for run-at-login
+  com.blaster-mac-client.plist  # LaunchAgent template (PROJECT_DIR substituted by install.sh)
   QUICKSTART.txt        # Short instructions for someone running on another Mac
   blaster/
     __init__.py
