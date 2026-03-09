@@ -73,8 +73,21 @@ class Config:
             if isinstance(raw_item, str):
                 return EventSpec(NamedCommand=raw_item, Delay=0, HeartbeatInterval=default_hbi)
             cmd = raw_item.get("NamedCommand") or default_cmd
-            delay = raw_item.get("Delay") if "Delay" in raw_item else (default_delay if default_delay is not None else 0)
-            hbi = raw_item.get("HeartbeatInterval") if "HeartbeatInterval" in raw_item else default_hbi
+
+            if "Delay" in raw_item:
+                delay = raw_item["Delay"]
+                if delay is not None and (not isinstance(delay, int) or delay < 0):
+                    raise ValueError(f"Delay must be a non-negative integer, got {delay!r}")
+            else:
+                delay = default_delay if default_delay is not None else 0
+
+            if "HeartbeatInterval" in raw_item:
+                hbi = raw_item["HeartbeatInterval"]
+                if hbi is not None and (not isinstance(hbi, int) or hbi < 0):
+                    raise ValueError(f"HeartbeatInterval must be a non-negative integer, got {hbi!r}")
+            else:
+                hbi = default_hbi
+
             return EventSpec(NamedCommand=cmd, Delay=delay, HeartbeatInterval=hbi)
 
         def event_specs(
