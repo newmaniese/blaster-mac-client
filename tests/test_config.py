@@ -174,3 +174,54 @@ def test_invalid_type_heartbeat_interval() -> None:
     }
     with pytest.raises(ValueError, match="HeartbeatInterval must be a non-negative integer"):
         Config.from_dict(data)
+        
+def test_default_config_path_ignores_cwd(tmp_path) -> None:
+    """Ensure _default_config_path ignores config.yaml in CWD."""
+    from blaster.config import _default_config_path
+    import os
+
+    original_cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        # Create a "malicious" config in CWD
+        (tmp_path / "config.yaml").write_text("ble: {device_name: Malicious}")
+
+        # Call _default_config_path
+        path = _default_config_path()
+
+        # Assert it's NOT the one in CWD
+        assert path != tmp_path / "config.yaml"
+
+        # It should be an absolute path ending in config.yaml
+        assert path.name == "config.yaml"
+        assert path.is_absolute()
+    finally:
+        os.chdir(original_cwd)
+        
+        
+def test_string_only_event_spec() -> None:
+    """Test events defined as strings in a list (not dicts)."""
+    cfg = Config.from_dict({
+        "events": {
+            "Active": ["Red", "Blue"],
+            "Idle": ["Green"],
+            "HeartbeatStopped": ["MyOff"],
+        },
+    })
+    # Active
+    assert len(cfg.events.Active) == 2
+    assert cfg.events.Active[0].NamedCommand == "Red"
+    assert cfg.events.Active[0].Delay == 0
+    assert cfg.events.Active[1].NamedCommand == "Blue"
+    assert cfg.events.Active[1].Delay == 0
+
+    # Idle
+    assert len(cfg.events.Idle) == 1
+    assert cfg.events.Idle[0].NamedCommand == "Green"
+    assert cfg.events.Idle[0].Delay == 0  # String spec always has delay 0
+
+    # HeartbeatStopped
+    assert len(cfg.events.HeartbeatStopped) == 1
+    assert cfg.events.HeartbeatStopped[0].NamedCommand == "MyOff"
+    assert cfg.events.HeartbeatStopped[0].Delay == 0
+    assert cfg.events.HeartbeatStopped[0].HeartbeatInterval == 60  # Default HBI preserved

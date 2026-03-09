@@ -82,12 +82,33 @@ From the project root with the venv activated:
 python -m blaster
 ```
 
+You can optionally specify a custom configuration file:
+
+```bash
+python -m blaster --config /path/to/myconfig.yaml
+```
+
 - The app scans for the device named **IR Blaster**, connects, sends **On** (optionally after a short delay), arms the ESP32 to run **Off** after a configurable delay with no heartbeat, and starts sending heartbeats periodically.
 - When any app starts using the camera or microphone, the client sends the **Active** command (e.g. Red) by name.
 - When both camera and microphone have been idle for the configured cooldown, it sends the **Idle** command (e.g. Green) by name.
 - If the Mac disconnects (sleep, out of range), heartbeats stop; the ESP32 runs the scheduled command (e.g. Off) after the configured delay.
 
 Stop with **Ctrl+C**; the client disconnects cleanly.
+
+### Run at login (LaunchAgent)
+
+Quick installer — from the project root:
+
+```bash
+chmod +x install.sh && ./install.sh
+```
+
+This installs the LaunchAgent (using `com.blaster-mac-client.plist`), creates `logs/`, and loads the agent. The client will start at login and restart if it exits or crashes. Logs: `logs/stdout.log` and `logs/stderr.log`.
+
+- **Unload (stop and disable):** `launchctl unload ~/Library/LaunchAgents/com.blaster-mac-client.plist`
+- **Reload after config change:** unload then `launchctl load ~/Library/LaunchAgents/com.blaster-mac-client.plist`
+
+You can also run `./install-launchd.sh` (it calls `install.sh`).
 
 ## Configuration
 
@@ -177,6 +198,8 @@ blaster-mac-client/
   config.yaml           # Device name, events (NamedCommand, Delay, HeartbeatInterval)
   requirements.txt
   run.sh                # One-step run (creates venv if needed, then starts app)
+  install.sh            # Light installer: install LaunchAgent for run-at-login
+  com.blaster-mac-client.plist  # LaunchAgent template (PROJECT_DIR substituted by install.sh)
   QUICKSTART.txt        # Short instructions for someone running on another Mac
   blaster/
     __init__.py

@@ -3,14 +3,17 @@ Blaster Mac Client — entry point. Run with: python -m blaster
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
 import logging
 import sys
+from pathlib import Path
 
 from blaster.av_monitor import get_initial_state, stream_av_events
 from blaster.ble_client import IRBlasterBLE
 from blaster.config import Config
 from blaster.state_machine import AVStateMachine
+from blaster.utils import execute_specs
 
 logging.basicConfig(
     level=logging.INFO,
@@ -20,8 +23,8 @@ logging.basicConfig(
 logger = logging.getLogger("blaster")
 
 
-async def run() -> None:
-    config = Config.load()
+async def run(config_path: Path | None = None) -> None:
+    config = Config.load(config_path)
     ble = IRBlasterBLE(config.ble)
     idle_delay = (
         config.events.Idle[0].Delay
@@ -29,50 +32,10 @@ async def run() -> None:
         else 120
     )
     sm = AVStateMachine(idle_delay)
-    last_av_active: bool = get_initial_state()[0] or get_initial_state()[1]
-
-    async def try_reconnect() -> None:
-        while True:
-            await asyncio.sleep(5.0)
-            if ble.is_connected:
-                return
-            logger.info("Reconnecting to IR Blaster...")
-            if await ble.connect():
-                return
-
-    ble.set_disconnect_callback(try_reconnect)
-
-    logger.info("Connecting to IR Blaster...")
-    if not await ble.connect():
-        logger.error("Could not find or connect to IR Blaster. Ensure it is on and paired.")
-        sys.exit(1)
-
-    # Wait until the link has proper encryption (macOS may not be ready immediately after connect).
-    try:
-        await ble.wait_until_ready()
-    except TimeoutError as e:
-        logger.warning("%s", e)
-    else:
-        # On connect: run each command with its delay (in order).
-        for spec in config.events.OnConnect:
-            if spec.Delay and spec.Delay > 0:
-                await asyncio.sleep(spec.Delay)
-            try:
-                status = await ble.send_command_by_name(spec.NamedCommand)
-                logger.info("Sent %s (on connect) -> %s", spec.NamedCommand, status)
-            except Exception as e:
-                logger.warning("Send %s on connect failed: %s", spec.NamedCommand, e)
+    initial_cam, initial_mic = get_initial_state()
+    last_av_active: bool = initial_cam or initial_mic
 
     hb0 = config.events.HeartbeatStopped[0] if config.events.HeartbeatStopped else None
-    if hb0 is not None:
-        try:
-            await ble.schedule_disconnect_command(
-                hb0.NamedCommand,
-                hb0.Delay or 900,
-            )
-        except Exception as e:
-            logger.warning("Schedule disconnect command failed: %s", e)
-
     heartbeat_interval = (hb0.HeartbeatInterval if hb0 else None) or 60
     heartbeat_task: asyncio.Task[None] | None = None
 
@@ -86,23 +49,52 @@ async def run() -> None:
             except Exception as e:
                 logger.debug("Heartbeat failed: %s", e)
 
-    if heartbeat_interval > 0:
-        heartbeat_task = asyncio.create_task(heartbeat_loop())
+    async def run_after_connect() -> None:
+        """Run OnConnect events, schedule disconnect command, and start heartbeat. Call after every connect (initial and reconnect)."""
+        nonlocal heartbeat_task
+        try:
+            await ble.wait_until_ready()
+        except TimeoutError as e:
+            logger.warning("%s", e)
+            return
+        # On connect: run each command with its delay (in order).
+        await execute_specs(ble, config.events.OnConnect, "on connect")
+        if hb0 is not None:
+            try:
+                await ble.schedule_disconnect_command(
+                    hb0.NamedCommand,
+                    hb0.Delay or 900,
+                )
+            except Exception as e:
+                logger.warning("Schedule disconnect command failed: %s", e)
+        if heartbeat_interval > 0:
+            heartbeat_task = asyncio.create_task(heartbeat_loop())
+
+    async def try_reconnect() -> None:
+        while True:
+            await asyncio.sleep(5.0)
+            if ble.is_connected:
+                return
+            logger.info("Reconnecting to IR Blaster...")
+            if await ble.connect():
+                await run_after_connect()
+                return
+
+    ble.set_disconnect_callback(try_reconnect)
+
+    logger.info("Connecting to IR Blaster...")
+    if not await ble.connect():
+        logger.error("Could not find or connect to IR Blaster. Ensure it is on and paired.")
+        sys.exit(1)
+
+    await run_after_connect()
 
     logger.info("Connected. Monitoring camera/mic...")
 
     # Apply initial AV state (e.g. if cam/mic already on, send Active command)
     cmd = sm.update(last_av_active)
     if cmd is not None:
-        specs = getattr(config.events, cmd)
-        for spec in specs:
-            if spec.Delay and spec.Delay > 0:
-                await asyncio.sleep(spec.Delay)
-            try:
-                status = await ble.send_command_by_name(spec.NamedCommand)
-                logger.info("Sent %s (initial) -> %s", spec.NamedCommand, status)
-            except Exception as e:
-                logger.warning("Send %s (initial) failed: %s", spec.NamedCommand, e)
+        await execute_specs(ble, getattr(config.events, cmd), "initial")
 
     async def av_loop() -> None:
         nonlocal last_av_active
@@ -111,14 +103,7 @@ async def run() -> None:
                 last_av_active = cam or mic
                 cmd = sm.update(last_av_active)
                 if cmd is not None and ble.is_connected:
-                    for spec in getattr(config.events, cmd):
-                        if spec.Delay and spec.Delay > 0:
-                            await asyncio.sleep(spec.Delay)
-                        try:
-                            status = await ble.send_command_by_name(spec.NamedCommand)
-                            logger.info("Sent %s -> %s", spec.NamedCommand, status)
-                        except Exception as e:
-                            logger.warning("Send %s failed: %s", spec.NamedCommand, e)
+                    await execute_specs(ble, getattr(config.events, cmd))
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -129,14 +114,7 @@ async def run() -> None:
             await asyncio.sleep(1.0)
             cmd = sm.update(last_av_active)
             if cmd is not None and ble.is_connected:
-                for spec in getattr(config.events, cmd):
-                    if spec.Delay and spec.Delay > 0:
-                        await asyncio.sleep(spec.Delay)
-                    try:
-                        status = await ble.send_command_by_name(spec.NamedCommand)
-                        logger.info("Sent %s (cooldown) -> %s", spec.NamedCommand, status)
-                    except Exception as e:
-                        logger.warning("Send %s (cooldown) failed: %s", spec.NamedCommand, e)
+                await execute_specs(ble, getattr(config.events, cmd), "cooldown")
 
     av_task = asyncio.create_task(av_loop())
     tick_task = asyncio.create_task(tick_loop())
@@ -168,8 +146,12 @@ async def run() -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Blaster Mac Client")
+    parser.add_argument("--config", type=Path, help="Path to config.yaml")
+    args = parser.parse_args()
+
     try:
-        asyncio.run(run())
+        asyncio.run(run(config_path=args.config))
     except KeyboardInterrupt:
         logger.info("Interrupted.")
         sys.exit(0)
