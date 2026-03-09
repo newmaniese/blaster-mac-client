@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import subprocess
 import sys
 from typing import AsyncIterator
 
@@ -46,8 +47,6 @@ def get_initial_state() -> tuple[bool, bool]:
     Run `log show --last 60s` with the sensor-indicators predicate and return
     (camera_active, mic_active) from the most recent event. If no events, returns (False, False).
     """
-    import subprocess
-
     cmd = [
         "/usr/bin/log", "show", "--last", "60s",
         "--style", "ndjson",

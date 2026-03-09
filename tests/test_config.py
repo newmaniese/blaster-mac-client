@@ -154,3 +154,31 @@ def test_default_config_path_ignores_cwd(tmp_path) -> None:
         assert path.is_absolute()
     finally:
         os.chdir(original_cwd)
+        
+        
+def test_string_only_event_spec() -> None:
+    """Test events defined as strings in a list (not dicts)."""
+    cfg = Config.from_dict({
+        "events": {
+            "Active": ["Red", "Blue"],
+            "Idle": ["Green"],
+            "HeartbeatStopped": ["MyOff"],
+        },
+    })
+    # Active
+    assert len(cfg.events.Active) == 2
+    assert cfg.events.Active[0].NamedCommand == "Red"
+    assert cfg.events.Active[0].Delay == 0
+    assert cfg.events.Active[1].NamedCommand == "Blue"
+    assert cfg.events.Active[1].Delay == 0
+
+    # Idle
+    assert len(cfg.events.Idle) == 1
+    assert cfg.events.Idle[0].NamedCommand == "Green"
+    assert cfg.events.Idle[0].Delay == 0  # String spec always has delay 0
+
+    # HeartbeatStopped
+    assert len(cfg.events.HeartbeatStopped) == 1
+    assert cfg.events.HeartbeatStopped[0].NamedCommand == "MyOff"
+    assert cfg.events.HeartbeatStopped[0].Delay == 0
+    assert cfg.events.HeartbeatStopped[0].HeartbeatInterval == 60  # Default HBI preserved
