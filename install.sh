@@ -15,7 +15,8 @@ mkdir -p logs
 
 # Install plist with this project path
 PLIST_DEST="$HOME/Library/LaunchAgents/com.blaster-mac-client.plist"
-sed "s|PROJECT_DIR|$PROJECT_DIR|g" com.blaster-mac-client.plist > "$PLIST_DEST"
+# Use python for literal string replacement to avoid sed injection/failure with special characters in PROJECT_DIR
+PROJECT_DIR="$PROJECT_DIR" python3 -c 'import os, sys; sys.stdout.write(sys.stdin.read().replace("PROJECT_DIR", os.environ["PROJECT_DIR"]))' < com.blaster-mac-client.plist > "$PLIST_DEST"
 
 # Load (reload if already loaded)
 launchctl unload "$PLIST_DEST" 2>/dev/null || true
