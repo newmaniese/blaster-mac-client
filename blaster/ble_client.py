@@ -55,6 +55,10 @@ class IRBlasterBLE:
     def is_connected(self) -> bool:
         return self._client is not None and self._client.is_connected
 
+    def _ensure_connected(self) -> None:
+        if not self.is_connected:
+            raise RuntimeError("Not connected to IR Blaster")
+
     async def connect(self) -> bool:
         """Discover device and connect. Returns True if connected."""
         if self._client and self._client.is_connected:
@@ -98,8 +102,7 @@ class IRBlasterBLE:
         Block until the connection has sufficient encryption for GATT read/write.
         Polls a read of Saved Codes until it succeeds or the timeout is reached.
         """
-        if not self._client or not self._client.is_connected:
-            raise RuntimeError("Not connected to IR Blaster")
+        self._ensure_connected()
         deadline = time.monotonic() + timeout_seconds
         attempt = 0
         while time.monotonic() < deadline:
@@ -115,8 +118,7 @@ class IRBlasterBLE:
 
     async def get_saved_codes(self, retries: int = 3) -> list[dict[str, Any]]:
         """Read Saved Codes characteristic and return parsed JSON array. Retries on empty/invalid response."""
-        if not self._client or not self._client.is_connected:
-            raise RuntimeError("Not connected to IR Blaster")
+        self._ensure_connected()
         last_error: Exception | None = None
         for attempt in range(retries):
             try:
@@ -147,8 +149,7 @@ class IRBlasterBLE:
         """
         Resolve name to index (cached), then send that index. Case-insensitive name match.
         """
-        if not self._client or not self._client.is_connected:
-            raise RuntimeError("Not connected to IR Blaster")
+        self._ensure_connected()
         if self._name_to_index is None:
             codes = await self.get_saved_codes()
             self._name_to_index = {}
@@ -167,15 +168,13 @@ class IRBlasterBLE:
 
     async def schedule_disconnect_command(self, command_name: str, delay_seconds: int) -> None:
         """Arm the ESP32 to run the given command after delay_seconds unless heartbeat resets it."""
-        if not self._client or not self._client.is_connected:
-            raise RuntimeError("Not connected to IR Blaster")
+        self._ensure_connected()
         payload = json.dumps({"delay_seconds": delay_seconds, "command": command_name})
         await self._client.write_gatt_char(CHAR_SCHEDULE_UUID, payload.encode("utf-8"))
 
     async def send_heartbeat(self) -> None:
         """Reset the ESP32 delayed-command timer."""
-        if not self._client or not self._client.is_connected:
-            raise RuntimeError("Not connected to IR Blaster")
+        self._ensure_connected()
         payload = json.dumps({"heartbeat": True})
         await self._client.write_gatt_char(CHAR_SCHEDULE_UUID, payload.encode("utf-8"))
 
@@ -184,8 +183,7 @@ class IRBlasterBLE:
         Write the saved-code index to the Send Command characteristic and wait for
         the Status notification. Returns the status string (e.g. "OK:Red" or "ERR:...").
         """
-        if not self._client or not self._client.is_connected:
-            raise RuntimeError("Not connected to IR Blaster")
+        self._ensure_connected()
         if index < 0 or index > 255:
             raise ValueError("index must be 0..255")
         payload = bytes([index])
