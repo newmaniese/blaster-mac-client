@@ -169,6 +169,10 @@ class IRBlasterBLE:
     async def schedule_disconnect_command(self, command_name: str, delay_seconds: int) -> None:
         """Arm the ESP32 to run the given command after delay_seconds unless heartbeat resets it."""
         self._ensure_connected()
+        if not isinstance(delay_seconds, int):
+            raise TypeError("delay_seconds must be an integer")
+        if delay_seconds < 0:
+            raise ValueError("delay_seconds must be non-negative")
         payload = json.dumps({"delay_seconds": delay_seconds, "command": command_name})
         await self._client.write_gatt_char(CHAR_SCHEDULE_UUID, payload.encode("utf-8"))
 
