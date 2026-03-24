@@ -13,7 +13,7 @@ from blaster.av_monitor import get_initial_state, stream_av_events
 from blaster.ble_client import IRBlasterBLE
 from blaster.config import Config
 from blaster.state_machine import AVStateMachine
-from blaster.utils import execute_specs
+from blaster.utils import execute_specs, sanitize_log_message
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,7 +47,7 @@ async def run(config_path: Path | None = None) -> None:
             try:
                 await ble.send_heartbeat()
             except Exception as e:
-                logger.debug("Heartbeat failed: %s", e)
+                logger.debug("Heartbeat failed: %s", sanitize_log_message(e))
 
     async def run_after_connect() -> None:
         """Run OnConnect events, schedule disconnect command, and start heartbeat. Call after every connect (initial and reconnect)."""
@@ -55,7 +55,7 @@ async def run(config_path: Path | None = None) -> None:
         try:
             await ble.wait_until_ready()
         except TimeoutError as e:
-            logger.warning("%s", e)
+            logger.warning("%s", sanitize_log_message(e))
             return
         # On connect: run each command with its delay (in order).
         await execute_specs(ble, config.events.OnConnect, "on connect")
@@ -66,7 +66,9 @@ async def run(config_path: Path | None = None) -> None:
                     hb0.Delay or 900,
                 )
             except Exception as e:
-                logger.warning("Schedule disconnect command failed: %s", e)
+                logger.warning(
+                    "Schedule disconnect command failed: %s", sanitize_log_message(e)
+                )
         if heartbeat_interval > 0:
             heartbeat_task = asyncio.create_task(heartbeat_loop())
 
@@ -107,7 +109,7 @@ async def run(config_path: Path | None = None) -> None:
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.exception("AV stream error: %s", e)
+            logger.exception("AV stream error: %s", sanitize_log_message(e))
 
     async def tick_loop() -> None:
         while True:
