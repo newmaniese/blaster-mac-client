@@ -14,6 +14,7 @@ from bleak import BleakClient, BleakScanner
 from bleak.backends.device import BLEDevice
 
 from blaster.config import BLEConfig
+from blaster.utils import sanitize_log_message
 
 # IR Blaster GATT UUIDs (must match ESP32 ble_server.h)
 IR_SERVICE_UUID = "e97a0001-c116-4a63-a60f-0e9b4d3648f3"
@@ -31,9 +32,9 @@ async def find_device(config: BLEConfig) -> BLEDevice | None:
     devices = await BleakScanner.discover(timeout=10.0)
     for d in devices:
         if d.name and config.device_name.lower() in d.name.lower():
-            logger.info("Found %s at %s", d.name, d.address)
+            logger.info("Found %s at %s", sanitize_log_message(d.name), d.address)
             return d
-    logger.warning("Device %s not found", config.device_name)
+    logger.warning("Device %s not found", sanitize_log_message(config.device_name))
     return None
 
 
@@ -66,10 +67,12 @@ class IRBlasterBLE:
         try:
             await self._client.connect()
             self._name_to_index = None  # refresh saved codes on next use
-            logger.info("Connected to %s", device.name or device.address)
+            logger.info(
+                "Connected to %s", sanitize_log_message(device.name or device.address)
+            )
             return True
         except Exception as e:
-            logger.exception("Connect failed: %s", e)
+            logger.exception("Connect failed: %s", sanitize_log_message(e))
             self._client = None
             self._device = None
             return False
@@ -130,7 +133,11 @@ class IRBlasterBLE:
             except (json.JSONDecodeError, ValueError) as e:
                 last_error = e
                 if attempt < retries - 1:
-                    logger.debug("Saved Codes read attempt %s failed: %s; retrying...", attempt + 1, e)
+                    logger.debug(
+                        "Saved Codes read attempt %s failed: %s; retrying...",
+                        attempt + 1,
+                        sanitize_log_message(e),
+                    )
                     await asyncio.sleep(1.0)
                 continue
         self._name_to_index = None

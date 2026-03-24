@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from blaster.ble_client import IRBlasterBLE
     from blaster.config import EventSpec
 
 logger = logging.getLogger("blaster.utils")
+
+
+def sanitize_log_message(msg: Any) -> str:
+    """Escapes control characters like newlines and carriage returns to prevent log injection."""
+    return str(msg).replace("\n", "\\n").replace("\r", "\\r")
 
 
 async def execute_specs(ble: IRBlasterBLE, specs: list[EventSpec], context: str = "") -> None:
@@ -28,6 +33,16 @@ async def execute_specs(ble: IRBlasterBLE, specs: list[EventSpec], context: str 
 
         try:
             status = await ble.send_command_by_name(spec.NamedCommand)
-            logger.info("Sent %s%s -> %s", spec.NamedCommand, ctx_str, status)
+            logger.info(
+                "Sent %s%s -> %s",
+                spec.NamedCommand,
+                ctx_str,
+                sanitize_log_message(status),
+            )
         except Exception as e:
-            logger.warning("Send %s%s failed: %s", spec.NamedCommand, ctx_str, e)
+            logger.warning(
+                "Send %s%s failed: %s",
+                spec.NamedCommand,
+                ctx_str,
+                sanitize_log_message(e),
+            )
