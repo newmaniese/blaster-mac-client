@@ -63,8 +63,10 @@ def get_initial_state() -> tuple[bool, bool]:
         return False, False
     if out.returncode != 0 or not out.stdout:
         return False, False
-    lines = [ln.strip() for ln in out.stdout.strip().splitlines() if ln.strip()]
-    for line in reversed(lines):
+    for line in reversed(out.stdout.strip().splitlines()):
+        line = line.strip()
+        if not line:
+            continue
         try:
             obj = json.loads(line)
             msg = obj.get("eventMessage") or obj.get("message") or ""
