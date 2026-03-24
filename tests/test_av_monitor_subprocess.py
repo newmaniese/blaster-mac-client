@@ -21,12 +21,6 @@ def test_get_initial_state_success(mock_run):
     mock_result.stdout = f"{log_line_1}\n{log_line_2}"
     mock_run.return_value = mock_result
 
-    # Expected: latest event (log_line_2) determines the state, so Mic only.
-    # Wait, the code says:
-    # for line in reversed(lines): ... return parse_event_message(msg)
-    # So it returns the first valid event it finds from the end.
-    # If line 2 is last, it checks line 2 first. Line 2 is mic only.
-
     assert get_initial_state() == (False, True)
 
     # Verify subprocess.run call arguments

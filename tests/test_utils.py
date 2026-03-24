@@ -49,7 +49,6 @@ class TestExecuteSpecs(unittest.IsolatedAsyncioTestCase):
         mock_logger.warning.assert_called_once()
         args, _ = mock_logger.warning.call_args
         # args[0] is format string, args[1:] are arguments
-        # "Send %s%s failed: %s"
         formatted_msg = args[0] % args[1:]
         self.assertIn("Cmd1 (error_test) failed: Fail", formatted_msg)
 
