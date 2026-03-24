@@ -17,6 +17,7 @@ LOG_PREDICATE = (
     "formatString BEGINSWITH 'Active '"
 )
 PREFIX = "Active activity attributions changed to ["
+SPLIT_PATTERN = re.compile(r",\s*")
 
 
 def parse_event_message(event_message: str) -> tuple[bool, bool]:
@@ -32,7 +33,7 @@ def parse_event_message(event_message: str) -> tuple[bool, bool]:
     camera = False
     mic = False
     # Items are like "cam:com.apple.FaceTime" or "mic:us.zoom.xos", comma-separated
-    for part in re.split(r",\s*", suffix):
+    for part in SPLIT_PATTERN.split(suffix):
         part = part.strip().strip("'\"")
         if part.startswith("cam:"):
             camera = True
