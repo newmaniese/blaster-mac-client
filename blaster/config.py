@@ -124,4 +124,5 @@ class Config:
 
 
 def _default_config_path() -> Path:
+    # Always resolve relative to the installed package, not the process CWD.
     return Path(__file__).resolve().parent.parent / "config.yaml"
