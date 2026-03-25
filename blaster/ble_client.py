@@ -98,9 +98,7 @@ class IRBlasterBLE:
         if not self._client or not self._client.is_connected:
             raise RuntimeError("Not connected to IR Blaster")
         deadline = time.monotonic() + timeout_seconds
-        attempt = 0
         while time.monotonic() < deadline:
-            attempt += 1
             try:
                 await self.get_saved_codes(retries=1)
                 return
