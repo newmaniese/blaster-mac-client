@@ -321,6 +321,21 @@ async def test_schedule_disconnect_command_invalid_type() -> None:
 
 
 @pytest.mark.asyncio
+async def test_schedule_disconnect_command_requires_connection() -> None:
+    config = BLEConfig(device_name="IR Blaster")
+    ble = IRBlasterBLE(config)
+
+    with pytest.raises(RuntimeError, match="Not connected to IR Blaster"):
+        await ble.schedule_disconnect_command("Off", 60)
+
+    mock_client = AsyncMock()
+    mock_client.is_connected = False
+    ble._client = mock_client
+    with pytest.raises(RuntimeError, match="Not connected to IR Blaster"):
+        await ble.schedule_disconnect_command("Off", 60)
+
+
+@pytest.mark.asyncio
 async def test_send_heartbeat() -> None:
     config = BLEConfig(device_name="Test Device")
     ble = IRBlasterBLE(config)
@@ -333,6 +348,21 @@ async def test_send_heartbeat() -> None:
 
     expected = json.dumps({"heartbeat": True}).encode("utf-8")
     mock_client.write_gatt_char.assert_called_once_with(CHAR_SCHEDULE_UUID, expected)
+
+
+@pytest.mark.asyncio
+async def test_send_heartbeat_requires_connection() -> None:
+    config = BLEConfig(device_name="IR Blaster")
+    ble = IRBlasterBLE(config)
+
+    with pytest.raises(RuntimeError, match="Not connected to IR Blaster"):
+        await ble.send_heartbeat()
+
+    mock_client = AsyncMock()
+    mock_client.is_connected = False
+    ble._client = mock_client
+    with pytest.raises(RuntimeError, match="Not connected to IR Blaster"):
+        await ble.send_heartbeat()
 
 
 @pytest.mark.asyncio
