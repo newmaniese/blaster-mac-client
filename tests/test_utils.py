@@ -68,3 +68,51 @@ class TestExecuteSpecs(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args[1], "Cmd1")
         self.assertEqual(args[2], "")
         self.assertEqual(args[3], "OK")
+
+
+class TestLogInjectionSanitization(unittest.IsolatedAsyncioTestCase):
+    async def test_log_injection_sanitization(self) -> None:
+        ble = AsyncMock()
+        malicious_status = (
+            "OK\n[2023-01-01 00:00:00] INFO blaster.utils: Sent AdminCmd (test) -> OK"
+        )
+        ble.send_command_by_name.return_value = malicious_status
+
+        specs = [EventSpec(NamedCommand="Cmd1\rLogInjection", Delay=0)]
+
+        with patch("blaster.utils.logger") as mock_logger:
+            await execute_specs(ble, specs, context="test\ncontext")
+
+            mock_logger.info.assert_called_once()
+            args, _ = mock_logger.info.call_args
+            self.assertNotIn("\n", args[1])
+            self.assertNotIn("\r", args[1])
+            self.assertIn("\\r", args[1])
+            self.assertNotIn("\n", args[2])
+            self.assertIn("\\n", args[2])
+            self.assertNotIn("\n", args[3])
+            self.assertIn("\\n", args[3])
+
+    async def test_non_string_status(self) -> None:
+        ble = AsyncMock()
+        ble.send_command_by_name.return_value = 200
+        specs = [EventSpec(NamedCommand="Cmd1")]
+
+        with patch("blaster.utils.logger") as mock_logger:
+            await execute_specs(ble, specs)
+
+            args, _ = mock_logger.info.call_args
+            self.assertEqual(args[3], "200")
+
+    async def test_exception_sanitization(self) -> None:
+        ble = AsyncMock()
+        ble.send_command_by_name.side_effect = Exception("Error\nMessage")
+        specs = [EventSpec(NamedCommand="Cmd1")]
+
+        with patch("blaster.utils.logger") as mock_logger:
+            await execute_specs(ble, specs)
+
+            mock_logger.warning.assert_called_once()
+            args, _ = mock_logger.warning.call_args
+            self.assertNotIn("\n", args[3])
+            self.assertIn("Error\\nMessage", args[3])
