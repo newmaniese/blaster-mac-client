@@ -8,7 +8,6 @@ import asyncio
 import json
 import re
 import subprocess
-import sys
 from typing import AsyncIterator
 
 # Predicate for sensor-indicators (cam/mic/loc). Must match macOS log format.
@@ -121,16 +120,3 @@ async def stream_av_events() -> AsyncIterator[tuple[bool, bool]]:
             proc.kill()
 
 
-if __name__ == "__main__":
-    # Quick test: print initial state then first few stream events
-    print("Initial state (last 60s):", get_initial_state())
-    print("Streaming (Ctrl+C to stop)...")
-
-    async def _run():
-        async for cam, mic in stream_av_events():
-            print(f"  cam={cam} mic={mic}")
-
-    try:
-        asyncio.run(_run())
-    except KeyboardInterrupt:
-        sys.exit(0)
