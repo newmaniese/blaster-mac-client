@@ -37,6 +37,8 @@ async def test_onconnect_fires_on_initial_connect(minimal_config: Config) -> Non
     mock_ble.wait_until_ready = AsyncMock()
     mock_ble.schedule_disconnect_command = AsyncMock()
     mock_ble.disconnect = AsyncMock()
+    mock_ble.send_heartbeat = AsyncMock()
+    mock_ble.send_command_by_name = AsyncMock(return_value="OK:test")
     mock_ble.set_disconnect_callback = MagicMock()
     mock_ble.is_connected = True
 
@@ -85,6 +87,8 @@ async def test_onconnect_fires_after_reconnect(minimal_config: Config) -> None:
     mock_ble.wait_until_ready = AsyncMock()
     mock_ble.schedule_disconnect_command = AsyncMock()
     mock_ble.disconnect = AsyncMock()
+    mock_ble.send_heartbeat = AsyncMock()
+    mock_ble.send_command_by_name = AsyncMock(return_value="OK:test")
     mock_ble.set_disconnect_callback = MagicMock()
     type(mock_ble).is_connected = property(lambda self: connected[0])
 
