@@ -157,7 +157,9 @@ class IRBlasterBLE:
                 if not isinstance(entry, dict):
                     continue
                 # Full format: index/name; compact (BLE): i/n
-                idx = entry.get("index") if "index" in entry else entry.get("i")
+                idx = entry.get("index")
+                if idx is None:
+                    idx = entry.get("i")
                 n = entry.get("name") or entry.get("n") or ""
                 if n and isinstance(idx, int):
                     self._name_to_index[n.lower()] = idx
