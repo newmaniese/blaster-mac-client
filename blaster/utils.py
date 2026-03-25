@@ -35,14 +35,14 @@ async def execute_specs(ble: IRBlasterBLE, specs: list[EventSpec], context: str 
             status = await ble.send_command_by_name(spec.NamedCommand)
             logger.info(
                 "Sent %s%s -> %s",
-                spec.NamedCommand,
-                ctx_str,
+                sanitize_log_message(spec.NamedCommand),
+                sanitize_log_message(ctx_str),
                 sanitize_log_message(status),
             )
         except Exception as e:
             logger.warning(
                 "Send %s%s failed: %s",
-                spec.NamedCommand,
-                ctx_str,
+                sanitize_log_message(spec.NamedCommand),
+                sanitize_log_message(ctx_str),
                 sanitize_log_message(e),
             )
