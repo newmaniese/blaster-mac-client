@@ -22,6 +22,9 @@ CHAR_SEND_UUID = "e97a0003-c116-4a63-a60f-0e9b4d3648f3"
 CHAR_STATUS_UUID = "e97a0004-c116-4a63-a60f-0e9b4d3648f3"
 CHAR_SCHEDULE_UUID = "e97a0005-c116-4a63-a60f-0e9b4d3648f3"
 
+# Pre-computed JSON payloads
+HEARTBEAT_PAYLOAD = json.dumps({"heartbeat": True}).encode("utf-8")
+
 logger = logging.getLogger(__name__)
 
 
@@ -169,8 +172,7 @@ class IRBlasterBLE:
         """Reset the ESP32 delayed-command timer."""
         if not self._client or not self._client.is_connected:
             raise RuntimeError("Not connected to IR Blaster")
-        payload = json.dumps({"heartbeat": True})
-        await self._client.write_gatt_char(CHAR_SCHEDULE_UUID, payload.encode("utf-8"))
+        await self._client.write_gatt_char(CHAR_SCHEDULE_UUID, HEARTBEAT_PAYLOAD)
 
     async def send_command(self, index: int) -> str:
         """

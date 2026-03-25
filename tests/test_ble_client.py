@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, patch
 from bleak.backends.device import BLEDevice
 
 from blaster.config import BLEConfig
-from blaster.ble_client import find_device
+from blaster.ble_client import find_device, IRBlasterBLE, CHAR_SCHEDULE_UUID, HEARTBEAT_PAYLOAD
 
 
 @pytest.mark.asyncio
@@ -77,3 +77,31 @@ async def test_find_device_partial_match() -> None:
         assert device is not None
         assert device.name == "My IR Blaster"
         mock_discover.assert_called_once_with(timeout=10.0)
+
+
+@pytest.mark.asyncio
+async def test_send_heartbeat() -> None:
+    config = BLEConfig(device_name="IR Blaster")
+    ble = IRBlasterBLE(config)
+
+    mock_client = AsyncMock()
+    mock_client.is_connected = True
+    ble._client = mock_client
+
+    await ble.send_heartbeat()
+
+    # Verify the exact bytes sent (equivalent to {"heartbeat": true})
+    expected_payload = b'{"heartbeat": true}'
+    mock_client.write_gatt_char.assert_called_once_with(
+        CHAR_SCHEDULE_UUID, expected_payload
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_heartbeat_not_connected() -> None:
+    config = BLEConfig(device_name="IR Blaster")
+    ble = IRBlasterBLE(config)
+
+    # Not connected
+    with pytest.raises(RuntimeError, match="Not connected to IR Blaster"):
+        await ble.send_heartbeat()
