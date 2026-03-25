@@ -110,7 +110,12 @@ class IRBlasterBLE:
             try:
                 await self.get_saved_codes(retries=1)
                 return
-            except Exception:
+            except Exception as e:
+                logger.debug(
+                    "wait_until_ready: Saved Codes read attempt %s failed: %s",
+                    attempt,
+                    sanitize_log_message(e),
+                )
                 await asyncio.sleep(0.5)
         raise TimeoutError(
             f"BLE link not ready after {timeout_seconds}s (encryption may not have completed)"
@@ -198,9 +203,15 @@ class IRBlasterBLE:
         def on_status(_handle: int, data: bytearray) -> None:
             if not result.done():
                 try:
-                    result.set_result(data.decode("utf-8", errors="replace"))
-                except Exception:
+                    text = data.decode("utf-8")
+                    result.set_result(text)
+                except UnicodeDecodeError:
+                    logger.warning("Status notification: failed to decode UTF-8")
                     result.set_result("ERR:decode")
+                except Exception:
+                    logger.exception("Status notification: unexpected error")
+                    if not result.done():
+                        result.set_result("ERR:internal")
 
         await self._client.start_notify(CHAR_STATUS_UUID, on_status)
         try:
