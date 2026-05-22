@@ -31,7 +31,7 @@ async def find_device(config: BLEConfig) -> BLEDevice | None:
     logger.info("Scanning for BLE device %s...", config.device_name)
     devices = await BleakScanner.discover(timeout=10.0)
     for d in devices:
-        if d.name and config.device_name.lower() in d.name.lower():
+        if d.name and config.device_name.lower() == d.name.lower():
             logger.info("Found %s at %s", sanitize_log_message(d.name), d.address)
             return d
     logger.warning("Device %s not found", sanitize_log_message(config.device_name))
