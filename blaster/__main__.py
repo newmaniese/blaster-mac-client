@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import logging
 import sys
 from pathlib import Path
@@ -120,31 +121,24 @@ async def run(config_path: Path | None = None) -> None:
 
     av_task = asyncio.create_task(av_loop())
     tick_task = asyncio.create_task(tick_loop())
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await asyncio.Future()
-    except asyncio.CancelledError:
-        pass
-    finally:
-        if heartbeat_task is not None:
-            heartbeat_task.cancel()
-            try:
-                await heartbeat_task
-            except asyncio.CancelledError:
-                pass
-        av_task.cancel()
-        tick_task.cancel()
-        try:
-            await av_task
-        except asyncio.CancelledError:
-            pass
-        try:
-            await tick_task
-        except asyncio.CancelledError:
-            pass
-        ble.set_disconnect_callback(None)
-        await ble.disconnect()
-        await asyncio.sleep(0.5)
-        logger.info("Shutdown complete.")
+
+    if heartbeat_task is not None:
+        heartbeat_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await heartbeat_task
+    av_task.cancel()
+    tick_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await av_task
+    with contextlib.suppress(asyncio.CancelledError):
+        await tick_task
+
+    ble.set_disconnect_callback(None)
+    await ble.disconnect()
+    await asyncio.sleep(0.5)
+    logger.info("Shutdown complete.")
 
 
 def main() -> None:
