@@ -81,7 +81,7 @@ class IRBlasterBLE:
             self._device = None
             return False
 
-    def _handle_disconnect(self, _client: BleakClient) -> None:
+    def _handle_disconnect(self, _: BleakClient) -> None:
         logger.warning("BLE disconnected")
         if self._on_disconnect:
             asyncio.create_task(self._on_disconnect())
