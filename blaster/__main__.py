@@ -9,6 +9,8 @@ import logging
 import sys
 from pathlib import Path
 
+from bleak import BleakError
+
 from blaster.av_monitor import get_initial_state, stream_av_events
 from blaster.ble_client import IRBlasterBLE
 from blaster.config import Config
@@ -46,7 +48,7 @@ async def run(config_path: Path | None = None) -> None:
                 return
             try:
                 await ble.send_heartbeat()
-            except Exception as e:
+            except (BleakError, asyncio.TimeoutError, RuntimeError) as e:
                 logger.debug("Heartbeat failed: %s", sanitize_log_message(e))
 
     async def run_after_connect() -> None:
@@ -65,7 +67,7 @@ async def run(config_path: Path | None = None) -> None:
                     hb0.NamedCommand,
                     hb0.Delay or 900,
                 )
-            except Exception as e:
+            except (BleakError, asyncio.TimeoutError, RuntimeError) as e:
                 logger.warning(
                     "Schedule disconnect command failed: %s", sanitize_log_message(e)
                 )
