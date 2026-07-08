@@ -6,9 +6,7 @@
 	<string>com.blaster-mac-client</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/bin/bash</string>
-		<string>-c</string>
-		<string>cd "PROJECT_DIR" &amp;&amp; ./run.sh</string>
+		<string>PROJECT_DIR/run.sh</string>
 	</array>
 	<key>WorkingDirectory</key>
 	<string>PROJECT_DIR</string>
