@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -57,10 +58,8 @@ async def test_onconnect_fires_on_initial_connect(minimal_config: Config) -> Non
         task = asyncio.create_task(run())
         await asyncio.sleep(0.2)
         task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
 
     on_connect_calls = [c for c in spec_calls if c[0] == minimal_config.events.OnConnect]
     assert len(on_connect_calls) >= 1, "OnConnect should run at least once on initial connect"
@@ -126,7 +125,5 @@ async def test_onconnect_fires_after_reconnect(minimal_config: Config) -> None:
         assert on_connect_after[1][1] == "on connect"
 
         task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
