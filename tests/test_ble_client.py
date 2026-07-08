@@ -232,6 +232,20 @@ class TestIRBlasterBLE(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(json.JSONDecodeError):
                 await ble.get_saved_codes(retries=2)
 
+    async def test_get_saved_codes_value_error_retries(self) -> None:
+        config = BLEConfig(device_name="Test Device")
+        ble = IRBlasterBLE(config)
+        mock_client = MagicMock()
+        mock_client.is_connected = True
+        mock_client.read_gatt_char = AsyncMock(return_value=b'{"not": "a list"}')
+        ble._client = mock_client
+
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            with self.assertRaises(ValueError):
+                await ble.get_saved_codes(retries=2)
+            assert mock_client.read_gatt_char.call_count == 2
+            assert mock_sleep.call_count == 1
+
     async def test_send_command_by_name_success(self) -> None:
         config = BLEConfig(device_name="Test Device")
         ble = IRBlasterBLE(config)
