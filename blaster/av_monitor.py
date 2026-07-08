@@ -8,7 +8,7 @@ import asyncio
 import json
 import re
 import subprocess
-from typing import AsyncIterator
+from typing import AsyncIterator, Iterator
 
 # Predicate for sensor-indicators (cam/mic/loc). Must match macOS log format.
 LOG_PREDICATE = (
@@ -19,6 +19,17 @@ LOG_PREDICATE = (
 PREFIX = "Active activity attributions changed to ["
 SPLIT_PATTERN = re.compile(r",\s*")
 
+
+def _reverse_lines(text: str) -> Iterator[str]:
+    """Yield lines from a string in reverse order without allocating a list of all lines."""
+    end = len(text)
+    while end > 0:
+        start = text.rfind('\n', 0, end)
+        if start == -1:
+            yield text[:end]
+            break
+        yield text[start+1:end]
+        end = start
 
 def parse_event_message(event_message: str) -> tuple[bool, bool]:
     """
@@ -63,7 +74,7 @@ def get_initial_state() -> tuple[bool, bool]:
         return False, False
     if out.returncode != 0 or not out.stdout:
         return False, False
-    for line in reversed(out.stdout.strip().splitlines()):
+    for line in _reverse_lines(out.stdout.strip()):
         line = line.strip()
         if not line:
             continue
