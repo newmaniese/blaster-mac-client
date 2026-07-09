@@ -101,16 +101,20 @@ async def run(config_path: Path | None = None) -> None:
 
     async def av_loop() -> None:
         nonlocal last_av_active
-        try:
-            async for cam, mic in stream_av_events():
-                last_av_active = cam or mic
-                cmd = sm.update(last_av_active)
-                if cmd is not None and ble.is_connected:
-                    await execute_specs(ble, getattr(config.events, cmd))
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            logger.exception("AV stream error: %s", sanitize_log_message(e))
+        while True:
+            try:
+                async for cam, mic in stream_av_events():
+                    last_av_active = cam or mic
+                    cmd = sm.update(last_av_active)
+                    if cmd is not None and ble.is_connected:
+                        await execute_specs(ble, getattr(config.events, cmd))
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.exception("AV stream error: %s", sanitize_log_message(e))
+
+            logger.warning("AV stream ended unexpectedly. Restarting in 1 second...")
+            await asyncio.sleep(1.0)
 
     async def tick_loop() -> None:
         while True:
