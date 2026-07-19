@@ -152,6 +152,31 @@ class TestIRBlasterBLE(unittest.IsolatedAsyncioTestCase):
 
         assert success is True
 
+    @patch("asyncio.create_task")
+    async def test_handle_disconnect_with_callback(self, mock_create_task: MagicMock) -> None:
+        config = BLEConfig(device_name="Test Device")
+        ble = IRBlasterBLE(config)
+        mock_callback = MagicMock()
+        mock_coro = MagicMock()
+        mock_callback.return_value = mock_coro
+        ble.set_disconnect_callback(mock_callback)
+        mock_client = MagicMock()
+
+        ble._handle_disconnect(mock_client)
+
+        mock_create_task.assert_called_once_with(mock_coro)
+        mock_callback.assert_called_once()
+
+    @patch("asyncio.create_task")
+    async def test_handle_disconnect_without_callback(self, mock_create_task: MagicMock) -> None:
+        config = BLEConfig(device_name="Test Device")
+        ble = IRBlasterBLE(config)
+        mock_client = MagicMock()
+
+        ble._handle_disconnect(mock_client)
+
+        mock_create_task.assert_not_called()
+
     async def test_disconnect(self) -> None:
         config = BLEConfig(device_name="Test Device")
         ble = IRBlasterBLE(config)
