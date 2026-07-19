@@ -94,7 +94,8 @@ async def stream_av_events() -> AsyncIterator[tuple[bool, bool]]:
     )
     last: tuple[bool, bool] | None = None
     try:
-        assert proc.stdout is not None
+        if proc.stdout is None:
+            raise RuntimeError("Failed to open stdout for av_monitor subprocess.")
         while True:
             line = await proc.stdout.readline()
             if not line:
@@ -114,10 +115,13 @@ async def stream_av_events() -> AsyncIterator[tuple[bool, bool]]:
             except (json.JSONDecodeError, KeyError):
                 continue
     finally:
-        try:
-            proc.terminate()
-            await asyncio.wait_for(proc.wait(), timeout=2.0)
-        except (ProcessLookupError, asyncio.TimeoutError):
-            proc.kill()
+        if proc.returncode is None:
+            try:
+                proc.terminate()
+                await asyncio.wait_for(proc.wait(), timeout=2.0)
+            except ProcessLookupError:
+                pass
+            except asyncio.TimeoutError:
+                proc.kill()
 
 
