@@ -257,6 +257,20 @@ class TestIRBlasterBLE(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(json.JSONDecodeError):
                 await ble.get_saved_codes(retries=2)
 
+    async def test_get_saved_codes_value_error_retries(self) -> None:
+        config = BLEConfig(device_name="Test Device")
+        ble = IRBlasterBLE(config)
+        mock_client = MagicMock()
+        mock_client.is_connected = True
+        mock_client.read_gatt_char = AsyncMock(return_value=b'{"not": "a list"}')
+        ble._client = mock_client
+
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            with self.assertRaises(ValueError):
+                await ble.get_saved_codes(retries=2)
+            assert mock_client.read_gatt_char.call_count == 2
+            assert mock_sleep.call_count == 1
+
     async def test_send_command_by_name_success(self) -> None:
         config = BLEConfig(device_name="Test Device")
         ble = IRBlasterBLE(config)
@@ -383,6 +397,56 @@ class TestIRBlasterBLE(unittest.IsolatedAsyncioTestCase):
         result = await ble.send_command(1)
 
         assert result == "OK:1"
+        mock_client.start_notify.assert_called_once()
+        mock_client.stop_notify.assert_called_once()
+        mock_client.write_gatt_char.assert_called_once_with(CHAR_SEND_UUID, bytes([1]))
+
+    async def test_send_command_decode_error(self) -> None:
+        config = BLEConfig(device_name="Test Device")
+        ble = IRBlasterBLE(config)
+        mock_client = MagicMock()
+        mock_client.is_connected = True
+        mock_client.start_notify = AsyncMock()
+        mock_client.stop_notify = AsyncMock()
+        mock_client.write_gatt_char = AsyncMock()
+        ble._client = mock_client
+
+        async def mock_write(_uuid: str, _payload: bytes) -> None:
+            callback = mock_client.start_notify.call_args[0][1]
+            mock_data = MagicMock(spec=bytearray)
+            mock_data.decode.side_effect = UnicodeDecodeError("utf-8", b"", 0, 1, "mock error")
+            callback(0, mock_data)
+
+        mock_client.write_gatt_char.side_effect = mock_write
+
+        result = await ble.send_command(1)
+
+        assert result == "ERR:decode"
+        mock_client.start_notify.assert_called_once()
+        mock_client.stop_notify.assert_called_once()
+        mock_client.write_gatt_char.assert_called_once_with(CHAR_SEND_UUID, bytes([1]))
+
+    async def test_send_command_generic_exception(self) -> None:
+        config = BLEConfig(device_name="Test Device")
+        ble = IRBlasterBLE(config)
+        mock_client = MagicMock()
+        mock_client.is_connected = True
+        mock_client.start_notify = AsyncMock()
+        mock_client.stop_notify = AsyncMock()
+        mock_client.write_gatt_char = AsyncMock()
+        ble._client = mock_client
+
+        async def mock_write(_uuid: str, _payload: bytes) -> None:
+            callback = mock_client.start_notify.call_args[0][1]
+            mock_data = MagicMock(spec=bytearray)
+            mock_data.decode.side_effect = Exception("Mock generic exception")
+            callback(0, mock_data)
+
+        mock_client.write_gatt_char.side_effect = mock_write
+
+        result = await ble.send_command(1)
+
+        assert result == "ERR:internal"
         mock_client.start_notify.assert_called_once()
         mock_client.stop_notify.assert_called_once()
         mock_client.write_gatt_char.assert_called_once_with(CHAR_SEND_UUID, bytes([1]))
