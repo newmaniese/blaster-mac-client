@@ -115,10 +115,13 @@ async def stream_av_events() -> AsyncIterator[tuple[bool, bool]]:
             except (json.JSONDecodeError, KeyError):
                 continue
     finally:
-        try:
-            proc.terminate()
-            await asyncio.wait_for(proc.wait(), timeout=2.0)
-        except (ProcessLookupError, asyncio.TimeoutError):
-            proc.kill()
+        if proc.returncode is None:
+            try:
+                proc.terminate()
+                await asyncio.wait_for(proc.wait(), timeout=2.0)
+            except ProcessLookupError:
+                pass
+            except asyncio.TimeoutError:
+                proc.kill()
 
 
