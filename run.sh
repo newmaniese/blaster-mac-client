@@ -5,8 +5,10 @@
 set -e
 cd "$(dirname "$0")"
 
-if [[ ! -d .venv ]]; then
+# Recreate if missing or if the interpreter symlink is broken (e.g. after a Homebrew Python upgrade).
+if [[ ! -x .venv/bin/python ]]; then
   echo "Creating virtualenv and installing dependencies..."
+  rm -rf .venv
   python3 -m venv .venv
   .venv/bin/pip install -q -r requirements.txt
 fi
