@@ -171,19 +171,13 @@ pytest tests/ -v
 
 ## Packaging for another Mac (e.g. send via Teams)
 
-From the **parent** of `blaster-mac-client`, create a zip that excludes venv and git (keeps the file small):
+From the project root:
 
 ```bash
-cd /path/to/parent
-zip -r blaster-mac-client.zip blaster-mac-client \
-  -x "blaster-mac-client/.venv/*" \
-  -x "blaster-mac-client/.git/*" \
-  -x "blaster-mac-client/__pycache__/*" \
-  -x "blaster-mac-client/*/__pycache__/*" \
-  -x "blaster-mac-client/.pytest_cache/*"
+make package
 ```
 
-Send `blaster-mac-client.zip` (e.g. via Teams). The zip includes **QUICKSTART.txt** with these steps for the recipient. On the other Mac:
+This writes `dist/blaster-mac-client.zip`, excluding `.venv`, `.git`, caches, and logs. Send that zip (e.g. via Teams). It includes **QUICKSTART.txt** with these steps for the recipient. On the other Mac:
 
 1. Unzip the file.
 2. Open Terminal, then: `cd blaster-mac-client`
@@ -195,6 +189,7 @@ The first run creates a virtualenv and installs dependencies; later runs start t
 
 ```
 blaster-mac-client/
+  Makefile              # make venv / test / run / install / package / clean
   config.yaml           # Device name, events (NamedCommand, Delay, HeartbeatInterval)
   requirements.txt
   run.sh                # One-step run (creates venv if needed, then starts app)
