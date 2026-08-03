@@ -3,10 +3,11 @@ import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-# Add project root to sys.path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from blaster.__main__ import main
+from blaster.web import DEFAULT_HOST, DEFAULT_PORT
 
 
 def _run_coroutine(coro):
@@ -25,14 +26,34 @@ class TestMainArgs(unittest.TestCase):
         with patch("sys.argv", ["blaster", "--config", str(test_config)]):
             with patch("asyncio.run", side_effect=_run_coroutine):
                 main()
-                mock_run.assert_called_once_with(config_path=test_config)
+                mock_run.assert_called_once_with(
+                    config_path=test_config,
+                    host=DEFAULT_HOST,
+                    port=DEFAULT_PORT,
+                )
 
     @patch("blaster.__main__.run")
     def test_main_default(self, mock_run):
         with patch("sys.argv", ["blaster"]):
             with patch("asyncio.run", side_effect=_run_coroutine):
                 main()
-                mock_run.assert_called_once_with(config_path=None)
+                mock_run.assert_called_once_with(
+                    config_path=None,
+                    host=DEFAULT_HOST,
+                    port=DEFAULT_PORT,
+                )
 
-if __name__ == '__main__':
+    @patch("blaster.__main__.run")
+    def test_main_with_port(self, mock_run):
+        with patch("sys.argv", ["blaster", "--port", "9000"]):
+            with patch("asyncio.run", side_effect=_run_coroutine):
+                main()
+                mock_run.assert_called_once_with(
+                    config_path=None,
+                    host=DEFAULT_HOST,
+                    port=9000,
+                )
+
+
+if __name__ == "__main__":
     unittest.main()

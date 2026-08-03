@@ -225,3 +225,42 @@ def test_string_only_event_spec() -> None:
     assert cfg.events.HeartbeatStopped[0].NamedCommand == "MyOff"
     assert cfg.events.HeartbeatStopped[0].Delay == 0
     assert cfg.events.HeartbeatStopped[0].HeartbeatInterval == 60  # Default HBI preserved
+
+
+def test_to_dict_round_trip() -> None:
+    cfg = Config.from_dict({
+        "ble": {"device_name": "RoundTrip"},
+        "events": {
+            "OnConnect": [
+                {"NamedCommand": "On", "Delay": 0},
+                {"NamedCommand": "Green", "Delay": 2},
+            ],
+            "HeartbeatStopped": [
+                {"NamedCommand": "Off", "Delay": 45, "HeartbeatInterval": 30},
+            ],
+            "Active": [{"NamedCommand": "Red"}],
+            "Idle": [{"NamedCommand": "Green", "Delay": 10}],
+        },
+    })
+    again = Config.from_dict(cfg.to_dict())
+    assert again.ble.device_name == "RoundTrip"
+    assert again.events.OnConnect[1].NamedCommand == "Green"
+    assert again.events.OnConnect[1].Delay == 2
+    assert again.events.HeartbeatStopped[0].Delay == 45
+    assert again.events.HeartbeatStopped[0].HeartbeatInterval == 30
+    assert again.events.Idle[0].Delay == 10
+
+
+def test_save_and_load_file(tmp_path: Path) -> None:
+    path = tmp_path / "config.yaml"
+    cfg = Config.from_dict({
+        "ble": {"device_name": "Saved"},
+        "events": {
+            "Idle": [{"NamedCommand": "Green", "Delay": 15}],
+        },
+    })
+    cfg.save(path)
+    loaded = Config.load(path)
+    assert loaded.ble.device_name == "Saved"
+    assert loaded.events.Idle[0].Delay == 15
+    assert loaded.events.Active[0].NamedCommand == "Red"

@@ -82,16 +82,22 @@ From the project root with the venv activated:
 python -m blaster
 ```
 
-You can optionally specify a custom configuration file:
+Or: `make run` (via `run.sh`).
+
+A local status UI starts at **http://127.0.0.1:8765** (localhost only). Use it to see connection/light status, send commands, edit config, and reconnect.
+
+Optional flags:
 
 ```bash
 python -m blaster --config /path/to/myconfig.yaml
+python -m blaster --port 9000
 ```
 
 - The app scans for the device named **IR Blaster**, connects, sends **On** (optionally after a short delay), arms the ESP32 to run **Off** after a configurable delay with no heartbeat, and starts sending heartbeats periodically.
 - When any app starts using the camera or microphone, the client sends the **Active** command (e.g. Red) by name.
 - When both camera and microphone have been idle for the configured cooldown, it sends the **Idle** command (e.g. Green) by name.
 - If the Mac disconnects (sleep, out of range), heartbeats stop; the ESP32 runs the scheduled command (e.g. Off) after the configured delay.
+- Saving config in the UI writes `config.yaml` and safely restarts the BLE session with the new settings.
 
 Stop with **Ctrl+C**; the client disconnects cleanly.
 
@@ -199,7 +205,10 @@ blaster-mac-client/
   blaster/
     __init__.py
     __main__.py         # Entry point (python -m blaster)
-    config.py           # Load config with defaults
+    app.py              # AppController: BLE lifecycle, status, safe config restart
+    web.py              # Localhost HTTP UI + JSON API (default :8765)
+    static/             # Status / controls / config UI
+    config.py           # Load/save config with defaults
     ble_client.py       # BLE scan, connect, send_command, reconnect
     av_monitor.py       # Camera/mic via log stream
     state_machine.py    # IDLE / ACTIVE / COOLDOWN, 2-min timer

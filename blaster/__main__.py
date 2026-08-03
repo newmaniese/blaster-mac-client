@@ -5,18 +5,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
 import logging
 import sys
 from pathlib import Path
 
-from bleak import BleakError
-
-from blaster.av_monitor import get_initial_state, stream_av_events
-from blaster.ble_client import IRBlasterBLE
-from blaster.config import Config
-from blaster.state_machine import AVStateMachine
-from blaster.utils import execute_specs, sanitize_log_message
+from blaster.app import AppController
+from blaster.web import DEFAULT_HOST, DEFAULT_PORT, start_web
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,134 +20,39 @@ logging.basicConfig(
 logger = logging.getLogger("blaster")
 
 
-async def run(config_path: Path | None = None) -> None:
-    config = Config.load(config_path)
-    ble = IRBlasterBLE(config.ble)
-    idle_delay = (
-        config.events.Idle[0].Delay
-        if config.events.Idle and config.events.Idle[0].Delay is not None
-        else 120
-    )
-    sm = AVStateMachine(idle_delay)
-    initial_cam, initial_mic = get_initial_state()
-    last_av_active: bool = initial_cam or initial_mic
-
-    hb0 = config.events.HeartbeatStopped[0] if config.events.HeartbeatStopped else None
-    heartbeat_interval = (hb0.HeartbeatInterval if hb0 else None) or 60
-    heartbeat_task: asyncio.Task[None] | None = None
-
-    async def heartbeat_loop() -> None:
-        while True:
-            await asyncio.sleep(heartbeat_interval)
-            if not ble.is_connected:
-                return
-            try:
-                await ble.send_heartbeat()
-            except (BleakError, asyncio.TimeoutError, RuntimeError) as e:
-                logger.debug("Heartbeat failed: %s", sanitize_log_message(e))
-
-    async def run_after_connect() -> None:
-        """Run OnConnect events, schedule disconnect command, and start heartbeat. Call after every connect (initial and reconnect)."""
-        nonlocal heartbeat_task
-        try:
-            await ble.wait_until_ready()
-        except TimeoutError as e:
-            logger.warning("%s", sanitize_log_message(e))
-            return
-        # On connect: run each command with its delay (in order).
-        await execute_specs(ble, config.events.OnConnect, "on connect")
-        if hb0 is not None:
-            try:
-                await ble.schedule_disconnect_command(
-                    hb0.NamedCommand,
-                    hb0.Delay or 900,
-                )
-            except (BleakError, asyncio.TimeoutError, RuntimeError) as e:
-                logger.warning(
-                    "Schedule disconnect command failed: %s", sanitize_log_message(e)
-                )
-        if heartbeat_interval > 0:
-            heartbeat_task = asyncio.create_task(heartbeat_loop())
-
-    async def try_reconnect() -> None:
-        while True:
-            await asyncio.sleep(5.0)
-            if ble.is_connected:
-                return
-            logger.info("Reconnecting to IR Blaster...")
-            if await ble.connect():
-                await run_after_connect()
-                return
-
-    ble.set_disconnect_callback(try_reconnect)
-
-    logger.info("Connecting to IR Blaster...")
-    if not await ble.connect():
-        logger.error("Could not find or connect to IR Blaster. Ensure it is on and paired.")
-        sys.exit(1)
-
-    await run_after_connect()
-
-    logger.info("Connected. Monitoring camera/mic...")
-
-    # Apply initial AV state (e.g. if cam/mic already on, send Active command)
-    cmd = sm.update(last_av_active)
-    if cmd is not None:
-        await execute_specs(ble, getattr(config.events, cmd), "initial")
-
-    async def av_loop() -> None:
-        nonlocal last_av_active
-        while True:
-            try:
-                async for cam, mic in stream_av_events():
-                    last_av_active = cam or mic
-                    cmd = sm.update(last_av_active)
-                    if cmd is not None and ble.is_connected:
-                        await execute_specs(ble, getattr(config.events, cmd))
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                logger.exception("AV stream error: %s", sanitize_log_message(e))
-
-            logger.warning("AV stream ended unexpectedly. Restarting in 1 second...")
-            await asyncio.sleep(1.0)
-
-    async def tick_loop() -> None:
-        while True:
-            await asyncio.sleep(1.0)
-            cmd = sm.update(last_av_active)
-            if cmd is not None and ble.is_connected:
-                await execute_specs(ble, getattr(config.events, cmd), "cooldown")
-
-    av_task = asyncio.create_task(av_loop())
-    tick_task = asyncio.create_task(tick_loop())
-    with contextlib.suppress(asyncio.CancelledError):
+async def run(
+    config_path: Path | None = None,
+    host: str = DEFAULT_HOST,
+    port: int = DEFAULT_PORT,
+) -> None:
+    controller = AppController(config_path)
+    await controller.start()
+    runner = await start_web(controller, host=host, port=port)
+    try:
         await asyncio.Future()
-
-    if heartbeat_task is not None:
-        heartbeat_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await heartbeat_task
-    av_task.cancel()
-    tick_task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await av_task
-    with contextlib.suppress(asyncio.CancelledError):
-        await tick_task
-
-    ble.set_disconnect_callback(None)
-    await ble.disconnect()
-    await asyncio.sleep(0.5)
-    logger.info("Shutdown complete.")
+    finally:
+        await runner.cleanup()
+        await controller.stop()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Blaster Mac Client")
     parser.add_argument("--config", type=Path, help="Path to config.yaml")
+    parser.add_argument(
+        "--host",
+        default=DEFAULT_HOST,
+        help=f"HTTP UI bind address (default {DEFAULT_HOST})",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_PORT,
+        help=f"HTTP UI port (default {DEFAULT_PORT})",
+    )
     args = parser.parse_args()
 
     try:
-        asyncio.run(run(config_path=args.config))
+        asyncio.run(run(config_path=args.config, host=args.host, port=args.port))
     except KeyboardInterrupt:
         logger.info("Interrupted.")
         sys.exit(0)

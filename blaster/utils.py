@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -10,13 +11,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("blaster.utils")
 
+# Optional callback: (command_name, status_string) after a successful send.
+OnCommandSent = Callable[[str, str], None]
+
 
 def sanitize_log_message(msg: Any) -> str:
     """Escapes control characters like newlines and carriage returns to prevent log injection."""
     return str(msg).replace("\n", "\\n").replace("\r", "\\r")
 
 
-async def execute_specs(ble: IRBlasterBLE, specs: list[EventSpec], context: str = "") -> None:
+async def execute_specs(
+    ble: IRBlasterBLE,
+    specs: list[EventSpec],
+    context: str = "",
+    on_sent: OnCommandSent | None = None,
+) -> None:
     """
     Executes a list of event specifications.
 
@@ -24,6 +33,7 @@ async def execute_specs(ble: IRBlasterBLE, specs: list[EventSpec], context: str 
       - If spec.Delay > 0, waits for that duration.
       - Tries to send the command by name using the BLE client.
       - Logs the outcome with context.
+      - Calls on_sent(name, status) on success.
     """
     for spec in specs:
         if spec.Delay and spec.Delay > 0:
@@ -39,6 +49,8 @@ async def execute_specs(ble: IRBlasterBLE, specs: list[EventSpec], context: str 
                 sanitize_log_message(ctx_str),
                 sanitize_log_message(status),
             )
+            if on_sent is not None:
+                on_sent(spec.NamedCommand, status)
         except Exception as e:
             logger.warning(
                 "Send %s%s failed: %s",

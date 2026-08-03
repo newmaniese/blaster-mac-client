@@ -69,6 +69,15 @@ class TestExecuteSpecs(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args[2], "")
         self.assertEqual(args[3], "OK")
 
+    async def test_execute_specs_on_sent_callback(self):
+        ble = AsyncMock()
+        ble.send_command_by_name.return_value = "OK:Red"
+        specs = [EventSpec(NamedCommand="Red")]
+        seen: list[tuple[str, str]] = []
+
+        await execute_specs(ble, specs, on_sent=lambda n, s: seen.append((n, s)))
+        self.assertEqual(seen, [("Red", "OK:Red")])
+
 
 class TestLogInjectionSanitization(unittest.IsolatedAsyncioTestCase):
     async def test_log_injection_sanitization(self) -> None:

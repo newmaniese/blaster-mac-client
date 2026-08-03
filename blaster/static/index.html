@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blaster Mac Client</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <main>
+    <header class="brand">
+      <h1>Blaster</h1>
+      <p class="tagline">Local IR status &amp; controls</p>
+    </header>
+
+    <section class="status" aria-label="Status">
+      <div class="status-row">
+        <div class="pill" id="conn-pill" data-state="unknown">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="conn-label">…</span>
+        </div>
+        <div class="light" id="light" data-color="unknown" title="Last command">
+          <span id="light-label">—</span>
+        </div>
+      </div>
+      <dl class="meta">
+        <div><dt>Device</dt><dd id="device-name">—</dd></div>
+        <div><dt>State</dt><dd id="sm-state">—</dd></div>
+        <div><dt>Camera</dt><dd id="cam">—</dd></div>
+        <div><dt>Mic</dt><dd id="mic">—</dd></div>
+      </dl>
+      <p class="error" id="error" hidden></p>
+    </section>
+
+    <section class="controls" aria-label="Controls">
+      <h2>Controls</h2>
+      <div class="actions">
+        <button type="button" id="btn-reconnect" class="primary">Reconnect</button>
+      </div>
+      <div class="commands" id="commands">
+        <p class="hint">Loading commands…</p>
+      </div>
+    </section>
+
+    <section class="config" aria-label="Configuration">
+      <h2>Configuration</h2>
+      <form id="config-form">
+        <label>
+          Device name
+          <input type="text" name="device_name" id="device_name_input" required>
+        </label>
+
+        <fieldset>
+          <legend>On connect</legend>
+          <div class="event-rows" id="onconnect-rows"></div>
+          <button type="button" class="ghost" data-add="OnConnect">Add command</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Heartbeat stopped</legend>
+          <div class="event-rows" id="heartbeat-rows"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Active (cam/mic on)</legend>
+          <div class="event-rows" id="active-rows"></div>
+          <button type="button" class="ghost" data-add="Active">Add command</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Idle (after cooldown)</legend>
+          <div class="event-rows" id="idle-rows"></div>
+          <button type="button" class="ghost" data-add="Idle">Add command</button>
+        </fieldset>
+
+        <div class="form-actions">
+          <button type="submit" class="primary">Save &amp; apply</button>
+          <span class="form-msg" id="config-msg" role="status"></span>
+        </div>
+      </form>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

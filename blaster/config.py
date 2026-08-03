@@ -70,6 +70,31 @@ class Config:
             ),
         )
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a dict suitable for YAML / JSON round-trip."""
+        return {
+            "ble": {"device_name": self.ble.device_name},
+            "events": {
+                "OnConnect": [_spec_to_dict(s) for s in self.events.OnConnect],
+                "HeartbeatStopped": [
+                    _spec_to_dict(s, include_heartbeat=True)
+                    for s in self.events.HeartbeatStopped
+                ],
+                "Active": [_spec_to_dict(s) for s in self.events.Active],
+                "Idle": [_spec_to_dict(s) for s in self.events.Idle],
+            },
+        }
+
+    def save(self, path: str | Path | None = None) -> None:
+        """Validate via from_dict round-trip, then write config.yaml."""
+        if path is None:
+            path = _default_config_path()
+        path = Path(path)
+        # Re-parse to ensure the written file matches validated shape.
+        validated = Config.from_dict(self.to_dict())
+        with open(path, "w") as f:
+            yaml.safe_dump(validated.to_dict(), f, default_flow_style=False, sort_keys=False)
+
 
 def _parse_one_spec(
     raw_item: dict[str, Any] | str | None,
@@ -126,6 +151,19 @@ def _parse_event_specs(
     return [_parse_one_spec(raw, default_cmd, default_delay, default_hbi if allow_heartbeat_interval else None)]
 
 
-def _default_config_path() -> Path:
+def _spec_to_dict(spec: EventSpec, include_heartbeat: bool = False) -> dict[str, Any]:
+    out: dict[str, Any] = {"NamedCommand": spec.NamedCommand}
+    if spec.Delay is not None:
+        out["Delay"] = spec.Delay
+    if include_heartbeat and spec.HeartbeatInterval is not None:
+        out["HeartbeatInterval"] = spec.HeartbeatInterval
+    return out
+
+
+def default_config_path() -> Path:
     # Always resolve relative to the installed package, not the process CWD.
     return Path(__file__).resolve().parent.parent / "config.yaml"
+
+
+def _default_config_path() -> Path:
+    return default_config_path()

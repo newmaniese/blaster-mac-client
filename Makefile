@@ -29,6 +29,8 @@ help:
 	@echo "  make install   Install LaunchAgent (run at login)"
 	@echo "  make package   Build shareable zip → dist/$(NAME).zip"
 	@echo "  make clean     Remove venv, caches, and dist/"
+	@echo ""
+	@echo "  UI (when running): http://127.0.0.1:8765"
 
 venv:
 	$(PYTHON) -m venv $(VENV)
