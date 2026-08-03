@@ -6,22 +6,28 @@
 	<string>com.blaster-mac-client</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>PROJECT_DIR/run.sh</string>
+		<string>INSTALL_DIR/.venv/bin/python</string>
+		<string>-m</string>
+		<string>blaster</string>
 	</array>
 	<key>WorkingDirectory</key>
-	<string>PROJECT_DIR</string>
+	<string>INSTALL_DIR</string>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>
 	<true/>
 	<key>StandardOutPath</key>
-	<string>PROJECT_DIR/logs/stdout.log</string>
+	<string>LOG_DIR/stdout.log</string>
 	<key>StandardErrorPath</key>
-	<string>PROJECT_DIR/logs/stderr.log</string>
+	<string>LOG_DIR/stderr.log</string>
 	<key>EnvironmentVariables</key>
 	<dict>
 		<key>PATH</key>
 		<string>/usr/local/bin:/usr/bin:/bin</string>
+		<key>PYTHONPATH</key>
+		<string>INSTALL_DIR</string>
+		<key>PYTHONUNBUFFERED</key>
+		<string>1</string>
 	</dict>
 </dict>
 </plist>

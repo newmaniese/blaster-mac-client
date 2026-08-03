@@ -1,20 +1,31 @@
 Blaster Mac Client — run on this Mac
 ====================================
 
-1. Open Terminal (Applications → Utilities → Terminal).
+1. Unzip this folder anywhere (Downloads is fine).
 
-2. Go into the folder:
+2. Open Terminal (Applications → Utilities → Terminal).
+
+3. Go into the folder:
    cd blaster-mac-client
 
-3. Run the app once (first run installs dependencies):
-   chmod +x run.sh && ./run.sh
-   Stop with Ctrl+C when done testing.
-
-4. Install to run at login (optional):
+4. Install it to run at login:
    chmod +x install.sh && ./install.sh
-   The client will start automatically when you log in and restart if it crashes.
-   Logs: logs/stdout.log and logs/stderr.log
-   To disable: launchctl unload ~/Library/LaunchAgents/com.blaster-mac-client.plist
+
+   This copies the app to ~/Library/Application Support/blaster-mac-client, installs the
+   dependencies, and starts it. It will start automatically when you log in and restart if
+   it crashes. No permission prompts and no Full Disk Access needed.
+
+   Status UI: http://127.0.0.1:8765
+   Logs: ~/Library/Logs/blaster-mac-client/stdout.log and stderr.log
+
+   After installing, you can delete this unzipped folder.
+
+To remove: ./uninstall.sh   (or, if you deleted this folder:
+   launchctl unload ~/Library/LaunchAgents/com.blaster-mac-client.plist
+   rm -rf ~/Library/LaunchAgents/com.blaster-mac-client.plist "~/Library/Application Support/blaster-mac-client")
+
+Just want to try it once, without installing?
+   chmod +x run.sh && ./run.sh      (Ctrl+C to stop)
 
 Requirements: macOS with Bluetooth; IR Blaster powered, in range, and paired with this Mac.
-Optional: edit config.yaml to change device name or command names.
+Optional: edit config.yaml (or use the status UI) to change device name or command names.

@@ -1,46 +1,90 @@
 #!/usr/bin/env bash
-# Light installer: set up Blaster Mac Client to run at login (LaunchAgent).
+# Installer: copy Blaster Mac Client into ~/Library/Application Support and run it at login.
+#
+# The copy matters: a LaunchAgent inherits no privacy (TCC) grants, so launchd cannot
+# read ~/Desktop, ~/Documents, ~/Downloads or iCloud Drive. Starting the app from one of
+# those folders fails with "Operation not permitted". ~/Library/Application Support is
+# not protected, so the agent runs with no permission prompts at all.
+#
 # Usage: ./install.sh
-# Uninstall: launchctl unload ~/Library/LaunchAgents/com.blaster-mac-client.plist
+# Uninstall: ./uninstall.sh
 
-set -e
+set -euo pipefail
 cd "$(dirname "$0")"
-PROJECT_DIR="$(pwd)"
+SRC_DIR="$(pwd)"
 
-# Ensure run.sh is executable (e.g. after unzipping)
-chmod +x run.sh 2>/dev/null || true
+LABEL="com.blaster-mac-client"
+INSTALL_DIR="$HOME/Library/Application Support/blaster-mac-client"
+LOG_DIR="$HOME/Library/Logs/blaster-mac-client"
+PLIST_DEST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
-# Create logs directory for the plist
-mkdir -p logs
+if [[ "$SRC_DIR" == "$INSTALL_DIR" ]]; then
+  echo "Error: run install.sh from your copy of the project, not from $INSTALL_DIR" >&2
+  exit 1
+fi
 
-# Install plist with this project path
-PLIST_DEST="$HOME/Library/LaunchAgents/com.blaster-mac-client.plist"
+# Stop any previous install before its files are replaced.
+launchctl unload "$PLIST_DEST" 2>/dev/null || true
+
+mkdir -p "$INSTALL_DIR" "$LOG_DIR" "$HOME/Library/LaunchAgents"
+
+echo "Installing to $INSTALL_DIR"
+rsync -a --delete \
+	--exclude '.venv/' \
+	--exclude '.git/' \
+	--exclude '.github/' \
+	--exclude 'dist/' \
+	--exclude 'logs/' \
+	--exclude '__pycache__/' \
+	--exclude '.pytest_cache/' \
+	--exclude '.DS_Store' \
+	--exclude 'config.yaml' \
+	"$SRC_DIR/" "$INSTALL_DIR/"
+
+if [[ -f "$INSTALL_DIR/config.yaml" ]]; then
+  echo "Keeping existing config: $INSTALL_DIR/config.yaml"
+else
+  cp "$SRC_DIR/config.yaml" "$INSTALL_DIR/config.yaml"
+fi
+
+# Build the venv here, in the interactive shell: launchd starts the agent with a minimal
+# PATH and no user shell, so dependency installation cannot be deferred to first launch.
+echo "Creating virtualenv and installing dependencies..."
+rm -rf "$INSTALL_DIR/.venv"
+python3 -m venv "$INSTALL_DIR/.venv"
+"$INSTALL_DIR/.venv/bin/pip" install -q -r "$INSTALL_DIR/requirements.txt"
+
 # Use plistlib so path special characters are correctly encoded (avoids shell/XML injection)
-PROJECT_DIR="$PROJECT_DIR" python3 -c '
+INSTALL_DIR="$INSTALL_DIR" LOG_DIR="$LOG_DIR" python3 -c '
 import os, sys, plistlib
 
-def replace_dir(obj, d):
+TOKENS = {"INSTALL_DIR": os.environ["INSTALL_DIR"], "LOG_DIR": os.environ["LOG_DIR"]}
+
+def substitute(obj):
     if isinstance(obj, str):
-        return obj.replace("PROJECT_DIR", d)
+        for token, value in TOKENS.items():
+            obj = obj.replace(token, value)
+        return obj
     if isinstance(obj, list):
-        return [replace_dir(i, d) for i in obj]
+        return [substitute(i) for i in obj]
     if isinstance(obj, dict):
-        return {k: replace_dir(v, d) for k, v in obj.items()}
+        return {k: substitute(v) for k, v in obj.items()}
     return obj
 
 p = plistlib.load(sys.stdin.buffer)
-plistlib.dump(replace_dir(p, os.environ["PROJECT_DIR"]), sys.stdout.buffer)
+plistlib.dump(substitute(p), sys.stdout.buffer)
 ' < com.blaster-mac-client.plist > "$PLIST_DEST"
 
-# Load (reload if already loaded)
-launchctl unload "$PLIST_DEST" 2>/dev/null || true
 launchctl load "$PLIST_DEST"
 
 echo ""
 echo "Blaster Mac Client is installed and running."
-echo "  • Starts automatically at login"
-echo "  • Restarts if it exits or crashes"
-echo "  • Logs: $PROJECT_DIR/logs/stdout.log  $PROJECT_DIR/logs/stderr.log"
+echo "  • Installed at: $INSTALL_DIR"
+echo "  • Starts automatically at login, restarts if it exits or crashes"
+echo "  • Logs: $LOG_DIR/stdout.log  $LOG_DIR/stderr.log"
 echo ""
-echo "To stop and disable: launchctl unload ~/Library/LaunchAgents/com.blaster-mac-client.plist"
+echo "Management page: http://127.0.0.1:8765"
+echo ""
+echo "This folder is no longer used at runtime — the installed copy is. Re-run ./install.sh after changing the code."
+echo "To remove: ./uninstall.sh"
 echo ""

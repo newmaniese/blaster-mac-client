@@ -5,11 +5,12 @@
 #   make venv      Create .venv and install dependencies
 #   make test      Run unit tests
 #   make run       Run the app (creates venv if needed)
-#   make install   Install LaunchAgent (run at login)
+#   make install   Install to ~/Library/Application Support + LaunchAgent (run at login)
+#   make uninstall Remove the installed copy and LaunchAgent
 #   make package   Build a shareable zip in dist/
 #   make clean     Remove venv, caches, and dist/
 
-.PHONY: help venv test run install package clean
+.PHONY: help venv test run install uninstall package clean
 
 PYTHON ?= python3
 VENV   := .venv
@@ -26,7 +27,8 @@ help:
 	@echo "  make venv      Create .venv and install dependencies"
 	@echo "  make test      Run unit tests"
 	@echo "  make run       Run the app (creates venv if needed)"
-	@echo "  make install   Install LaunchAgent (run at login)"
+	@echo "  make install   Install to ~/Library/Application Support + run at login"
+	@echo "  make uninstall Remove the installed copy and LaunchAgent"
 	@echo "  make package   Build shareable zip → dist/$(NAME).zip"
 	@echo "  make clean     Remove venv, caches, and dist/"
 	@echo ""
@@ -46,6 +48,10 @@ run:
 install:
 	chmod +x install.sh run.sh
 	./install.sh
+
+uninstall:
+	chmod +x uninstall.sh
+	./uninstall.sh
 
 # Stage a clean tree, then zip with a top-level blaster-mac-client/ folder
 # so recipients can follow QUICKSTART.txt (cd blaster-mac-client && ./run.sh).

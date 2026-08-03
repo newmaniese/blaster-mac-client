@@ -109,16 +109,37 @@ Quick installer — from the project root:
 chmod +x install.sh && ./install.sh
 ```
 
-This installs the LaunchAgent (using `com.blaster-mac-client.plist`), creates `logs/`, and loads the agent. The client will start at login and restart if it exits or crashes. Logs: `logs/stdout.log` and `logs/stderr.log`.
+This:
 
-- **Unload (stop and disable):** `launchctl unload ~/Library/LaunchAgents/com.blaster-mac-client.plist`
-- **Reload after config change:** unload then `launchctl load ~/Library/LaunchAgents/com.blaster-mac-client.plist`
+1. Copies the project to `~/Library/Application Support/blaster-mac-client` (excluding `.git`, `dist`, caches, and any existing installed `config.yaml`).
+2. Creates the virtualenv there and installs dependencies.
+3. Writes `~/Library/LaunchAgents/com.blaster-mac-client.plist` from `com.blaster-mac-client.plist` (substituting the install and log directories) and loads it.
+
+The client starts at login and restarts if it exits or crashes. Logs: `~/Library/Logs/blaster-mac-client/stdout.log` and `stderr.log`.
+
+The installed copy is what runs — re-run `./install.sh` after changing code in the source tree. Editing config is safe either way: `install.sh` never overwrites an existing `~/Library/Application Support/blaster-mac-client/config.yaml`.
+
+- **Uninstall (stop, disable, remove the installed copy):** `./uninstall.sh`
+- **Reload:** `launchctl unload ~/Library/LaunchAgents/com.blaster-mac-client.plist` then `launchctl load …` (saving config in the UI restarts the BLE session on its own, so no reload is needed for config changes)
 
 You can also run `./install-launchd.sh` (it calls `install.sh`).
 
+#### Why it installs to `~/Library/Application Support`
+
+A LaunchAgent inherits no privacy (TCC) grants, so launchd cannot read `~/Desktop`, `~/Documents`, `~/Downloads`, or iCloud Drive. An agent pointed at a project in one of those folders dies immediately with:
+
+```
+shell-init: error retrieving current directory: getcwd: cannot access parent directories: Operation not permitted
+bash: /Users/you/Downloads/blaster-mac-client/run.sh: Operation not permitted
+```
+
+`~/Library/Application Support` is not protected, so installing there means the agent runs with **no permission prompts and no Full Disk Access**. The agent also launches `.venv/bin/python -m blaster` directly rather than going through `run.sh`, so it needs no shell and never installs dependencies at login.
+
+The one permission that can still be required is **Bluetooth**: if the light never responds after installing, check **System Settings → Privacy & Security → Bluetooth** and allow `blaster-mac-client`.
+
 ## Configuration
 
-Edit `config.yaml` in the project root. All commands are specified by **name** (the client resolves names to indices using the device’s Saved Codes).
+Edit `config.yaml` next to the `blaster/` package — the project root when running from source, or `~/Library/Application Support/blaster-mac-client/config.yaml` once installed (the status UI always edits the one the running app loaded). All commands are specified by **name** (the client resolves names to indices using the device’s Saved Codes).
 
 ```yaml
 ble:
@@ -175,6 +196,9 @@ pytest tests/ -v
 - **Command not found**  
   Command names in `config.yaml` (e.g. "Red", "Green", "On", "Off") must match the **name** of a saved code on the IR Blaster. Check the web UI or `GET /saved` for the exact names.
 
+- **`Operation not permitted` in the LaunchAgent logs**  
+  The agent is pointed at a privacy-protected folder (`~/Desktop`, `~/Documents`, `~/Downloads`, iCloud Drive). Run `./install.sh` again to reinstall to `~/Library/Application Support/blaster-mac-client`; see [Why it installs to `~/Library/Application Support`](#why-it-installs-to-libraryapplication-support).
+
 ## Packaging for another Mac (e.g. send via Teams)
 
 From the project root:
@@ -185,11 +209,11 @@ make package
 
 This writes `dist/blaster-mac-client.zip`, excluding `.venv`, `.git`, caches, and logs. Send that zip (e.g. via Teams). It includes **QUICKSTART.txt** with these steps for the recipient. On the other Mac:
 
-1. Unzip the file.
+1. Unzip the file (anywhere, including Downloads).
 2. Open Terminal, then: `cd blaster-mac-client`
-3. Run: `chmod +x run.sh && ./run.sh`
+3. Install to run at login: `chmod +x install.sh && ./install.sh`
 
-The first run creates a virtualenv and installs dependencies; later runs start the app immediately. Stop with **Ctrl+C**.
+The installer copies the app out of the unzipped folder, so the recipient can delete it afterwards. To try it once without installing, run `chmod +x run.sh && ./run.sh` instead and stop with **Ctrl+C**.
 
 ## Project layout
 
@@ -198,9 +222,10 @@ blaster-mac-client/
   Makefile              # make venv / test / run / install / package / clean
   config.yaml           # Device name, events (NamedCommand, Delay, HeartbeatInterval)
   requirements.txt
-  run.sh                # One-step run (creates venv if needed, then starts app)
-  install.sh            # Light installer: install LaunchAgent for run-at-login
-  com.blaster-mac-client.plist  # LaunchAgent template (PROJECT_DIR substituted by install.sh)
+  run.sh                # One-step run from source (creates venv if needed, then starts app)
+  install.sh            # Installer: copy to ~/Library/Application Support + LaunchAgent
+  uninstall.sh          # Unload the agent and delete the installed copy
+  com.blaster-mac-client.plist  # LaunchAgent template (INSTALL_DIR / LOG_DIR substituted by install.sh)
   QUICKSTART.txt        # Short instructions for someone running on another Mac
   blaster/
     __init__.py
