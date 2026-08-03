@@ -121,3 +121,61 @@ async def test_onconnect_fires_after_reconnect(minimal_config) -> None:
             assert on_connect_after[1][1] == "on connect"
         finally:
             await ctrl.stop()
+
+
+@pytest.mark.asyncio
+async def test_schedule_rearmed_before_onconnect_commands(minimal_config) -> None:
+    """The device timer is reset before OnConnect commands, on connect and reconnect."""
+    _cfg, path = minimal_config
+    events: list[str] = []
+
+    async def record_execute_specs(ble, specs, context="", on_sent=None):
+        events.append(f"specs:{context}")
+
+    connected = [True]
+
+    async def connect_and_mark():
+        connected[0] = True
+        return True
+
+    mock_ble = MagicMock()
+    mock_ble.connect = AsyncMock(side_effect=connect_and_mark)
+    mock_ble.wait_until_ready = AsyncMock()
+    mock_ble.schedule_disconnect_command = AsyncMock(
+        side_effect=lambda *_a, **_k: events.append("schedule")
+    )
+    mock_ble.disconnect = AsyncMock()
+    mock_ble.send_heartbeat = AsyncMock()
+    mock_ble.send_command_by_name = AsyncMock(return_value="OK:test")
+    mock_ble.set_disconnect_callback = MagicMock()
+    type(mock_ble).is_connected = property(lambda self: connected[0])
+
+    with (
+        patch("blaster.app.IRBlasterBLE", return_value=mock_ble),
+        patch("blaster.app.execute_specs", side_effect=record_execute_specs),
+        patch("blaster.app.get_initial_state", return_value=(False, False)),
+        patch("blaster.app.stream_av_events", return_value=_never_yield()),
+    ):
+        ctrl = AppController(path)
+        await ctrl.start()
+        try:
+            assert events[0] == "schedule", (
+                f"schedule must be armed before any commands, got {events}"
+            )
+            hb_task = ctrl._heartbeat_task
+            assert hb_task is not None and not hb_task.done()
+
+            events.clear()
+            connected[0] = False
+            await ctrl.request_reconnect()
+
+            assert events[0] == "schedule", (
+                f"schedule must be re-armed before OnConnect commands, got {events}"
+            )
+            assert "specs:on connect" in events
+            assert ctrl._heartbeat_task is not hb_task, (
+                "heartbeat loop should be restarted on reconnect"
+            )
+            assert hb_task.cancelled() or hb_task.done()
+        finally:
+            await ctrl.stop()

@@ -52,23 +52,27 @@
 
         <fieldset>
           <legend>On connect</legend>
+          <p class="field-help">Commands run when the client connects. Delay is seconds to wait before each command.</p>
           <div class="event-rows" id="onconnect-rows"></div>
           <button type="button" class="ghost" data-add="OnConnect">Add command</button>
         </fieldset>
 
         <fieldset>
           <legend>Heartbeat stopped</legend>
+          <p class="field-help">If the Mac stops heartbeating, the ESP32 runs this command after Delay seconds. Heartbeat interval is how often (seconds) the client pings while connected, and must be less than Delay.</p>
           <div class="event-rows" id="heartbeat-rows"></div>
         </fieldset>
 
         <fieldset>
           <legend>Active (cam/mic on)</legend>
+          <p class="field-help">Commands when camera or mic turns on. Delay is seconds to wait before each command.</p>
           <div class="event-rows" id="active-rows"></div>
           <button type="button" class="ghost" data-add="Active">Add command</button>
         </fieldset>
 
         <fieldset>
           <legend>Idle (after cooldown)</legend>
+          <p class="field-help">First row’s Delay is the cooldown (seconds both cam and mic must stay off) before Idle commands run. Later rows’ Delay is wait before that command.</p>
           <div class="event-rows" id="idle-rows"></div>
           <button type="button" class="ghost" data-add="Idle">Add command</button>
         </fieldset>

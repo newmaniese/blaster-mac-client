@@ -146,7 +146,7 @@ Every event is a **list** of `{ NamedCommand, Delay? }`. Commands run in order; 
 | Event | Description |
 |-------|-------------|
 | **OnConnect** | Commands to run when the client connects, in order. |
-| **HeartbeatStopped** | First item only: ESP32 runs `NamedCommand` when no heartbeat for `Delay` seconds; `HeartbeatInterval` = how often the client sends a heartbeat. |
+| **HeartbeatStopped** | First item only: ESP32 runs `NamedCommand` when no heartbeat for `Delay` seconds; `HeartbeatInterval` = how often the client sends a heartbeat. Must be less than `Delay` (or 0 to disable heartbeats), otherwise the config is rejected. |
 | **Active** | Commands when camera or mic turns on (e.g. "Red"). |
 | **Idle** | First item's `Delay` = cooldown (seconds) before Idle; then all commands run in order. |
 

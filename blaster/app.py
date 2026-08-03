@@ -13,7 +13,7 @@ from bleak import BleakError
 
 from blaster.av_monitor import get_initial_state, stream_av_events
 from blaster.ble_client import IRBlasterBLE
-from blaster.config import Config, default_config_path
+from blaster.config import Config, default_config_path, schedule_delay_seconds
 from blaster.state_machine import AVStateMachine
 from blaster.utils import execute_specs, sanitize_log_message
 
@@ -221,18 +221,24 @@ class AppController:
         except TimeoutError as e:
             logger.warning("%s", sanitize_log_message(e))
             return
+        # Re-arm before OnConnect: arming resets the device timer, so any delay in
+        # the OnConnect commands cannot let the HeartbeatStopped command fire.
+        await self._restart_schedule()
         await execute_specs(
             self.ble,
             self.config.events.OnConnect,
             "on connect",
             on_sent=self._on_command_sent,
         )
+
+    async def _restart_schedule(self) -> None:
+        """Re-arm the device's delayed command (resetting its timer) and restart heartbeats."""
         hb0 = self._hb0()
         if hb0 is not None:
             try:
                 await self.ble.schedule_disconnect_command(
                     hb0.NamedCommand,
-                    hb0.Delay or 900,
+                    schedule_delay_seconds(hb0),
                 )
             except (BleakError, asyncio.TimeoutError, RuntimeError) as e:
                 logger.warning(

@@ -17,6 +17,9 @@ DEFAULT_HEARTBEAT_STOPPED = ("Off", 900, 60)
 DEFAULT_ACTIVE = ("Red", None, None)
 DEFAULT_IDLE = ("Green", 120, None)
 
+# A HeartbeatStopped Delay of 0 or None means "unset"; the device is armed with this.
+DEFAULT_SCHEDULE_DELAY_SECONDS = 900
+
 
 @dataclass
 class BLEConfig:
@@ -58,16 +61,19 @@ class Config:
         ble_data = data.get("ble") or {}
         events_data = data.get("events") or {}
 
+        events = EventsConfig(
+            OnConnect=_parse_event_specs(events_data, "OnConnect", DEFAULT_ON_CONNECT),
+            HeartbeatStopped=_parse_event_specs(events_data, "HeartbeatStopped", DEFAULT_HEARTBEAT_STOPPED, allow_heartbeat_interval=True),
+            Active=_parse_event_specs(events_data, "Active", DEFAULT_ACTIVE),
+            Idle=_parse_event_specs(events_data, "Idle", DEFAULT_IDLE),
+        )
+        _validate_heartbeat_window(events.HeartbeatStopped)
+
         return cls(
             ble=BLEConfig(
                 device_name=ble_data.get("device_name") or DEFAULT_DEVICE_NAME,
             ),
-            events=EventsConfig(
-                OnConnect=_parse_event_specs(events_data, "OnConnect", DEFAULT_ON_CONNECT),
-                HeartbeatStopped=_parse_event_specs(events_data, "HeartbeatStopped", DEFAULT_HEARTBEAT_STOPPED, allow_heartbeat_interval=True),
-                Active=_parse_event_specs(events_data, "Active", DEFAULT_ACTIVE),
-                Idle=_parse_event_specs(events_data, "Idle", DEFAULT_IDLE),
-            ),
+            events=events,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -149,6 +155,29 @@ def _parse_event_specs(
         return out
     # single dict (backward compat)
     return [_parse_one_spec(raw, default_cmd, default_delay, default_hbi if allow_heartbeat_interval else None)]
+
+
+def schedule_delay_seconds(spec: EventSpec) -> int:
+    """Countdown the device is armed with for a HeartbeatStopped spec."""
+    return spec.Delay or DEFAULT_SCHEDULE_DELAY_SECONDS
+
+
+def _validate_heartbeat_window(specs: list[EventSpec]) -> None:
+    """
+    The client must heartbeat faster than the device's countdown. With an interval at
+    or above the delay, the ESP32 window expires before the first heartbeat arrives and
+    the command runs on every connection. An interval of 0 disables heartbeats entirely.
+    """
+    hb = specs[0] if specs else None
+    if hb is None or not hb.HeartbeatInterval:
+        return
+    delay = schedule_delay_seconds(hb)
+    if hb.HeartbeatInterval >= delay:
+        raise ValueError(
+            f"HeartbeatInterval ({hb.HeartbeatInterval}s) must be less than the "
+            f"HeartbeatStopped Delay ({delay}s), otherwise {hb.NamedCommand!r} "
+            f"runs even while the Mac is connected"
+        )
 
 
 def _spec_to_dict(spec: EventSpec, include_heartbeat: bool = False) -> dict[str, Any]:

@@ -69,17 +69,49 @@
     btnReconnect.disabled = !!s.connected || !!s.reconnecting;
   }
 
+  const EVENT_FIELD_LABELS = {
+    OnConnect: {
+      delay: "Delay (sec)",
+      delayTitle: "Seconds to wait before sending this command after connect",
+    },
+    HeartbeatStopped: {
+      delay: "Timeout (sec)",
+      delayTitle: "Seconds without a heartbeat before the ESP32 runs this command",
+      heartbeat: "Heartbeat interval (sec)",
+      heartbeatTitle: "How often the Mac sends a heartbeat while connected",
+    },
+    Active: {
+      delay: "Delay (sec)",
+      delayTitle: "Seconds to wait before sending this command when cam/mic turns on",
+    },
+    Idle: {
+      delay: "Cooldown / delay (sec)",
+      delayTitle: "First row: cooldown with cam+mic off. Other rows: wait before that command",
+    },
+  };
+
   function specRow(spec, opts) {
     const row = document.createElement("div");
-    row.className = "event-row";
+    row.className = "event-row" + (opts.showHeartbeat ? " event-row-hb" : "");
     const showHb = !!opts.showHeartbeat;
     const canRemove = opts.canRemove !== false;
+    const labels = EVENT_FIELD_LABELS[opts.eventKey] || EVENT_FIELD_LABELS.Active;
 
     row.innerHTML = `
-      <input type="text" data-field="NamedCommand" placeholder="Command" value="${escapeAttr(spec.NamedCommand || "")}" required>
-      <input type="number" data-field="Delay" placeholder="Delay" min="0" step="1" value="${spec.Delay ?? ""}">
-      ${showHb ? `<input type="number" data-field="HeartbeatInterval" placeholder="HB sec" min="0" step="1" value="${spec.HeartbeatInterval ?? ""}">` : "<span></span>"}
-      ${canRemove ? '<button type="button" class="remove" aria-label="Remove">Remove</button>' : "<span></span>"}
+      <label class="field">
+        <span class="field-label">Command</span>
+        <input type="text" data-field="NamedCommand" placeholder="e.g. Red" value="${escapeAttr(spec.NamedCommand || "")}" required>
+      </label>
+      <label class="field">
+        <span class="field-label">${escapeAttr(labels.delay)}</span>
+        <input type="number" data-field="Delay" min="0" step="1" value="${spec.Delay ?? ""}" title="${escapeAttr(labels.delayTitle)}" aria-label="${escapeAttr(labels.delay)}">
+      </label>
+      ${showHb ? `
+      <label class="field">
+        <span class="field-label">${escapeAttr(labels.heartbeat)}</span>
+        <input type="number" data-field="HeartbeatInterval" min="0" step="1" value="${spec.HeartbeatInterval ?? ""}" title="${escapeAttr(labels.heartbeatTitle)}" aria-label="${escapeAttr(labels.heartbeat)}">
+      </label>` : ""}
+      ${canRemove ? '<button type="button" class="remove" aria-label="Remove">Remove</button>' : '<span class="remove-spacer"></span>'}
     `;
 
     const removeBtn = row.querySelector(".remove");
@@ -102,13 +134,13 @@
     const showHeartbeat = key === "HeartbeatStopped";
     const canRemove = key !== "HeartbeatStopped";
     (specs || []).forEach((spec) => {
-      container.appendChild(specRow(spec, { showHeartbeat, canRemove }));
+      container.appendChild(specRow(spec, { showHeartbeat, canRemove, eventKey: key }));
     });
     if (!specs || specs.length === 0) {
       container.appendChild(
         specRow(
           { NamedCommand: "", Delay: key === "Idle" ? 120 : 0 },
-          { showHeartbeat, canRemove }
+          { showHeartbeat, canRemove, eventKey: key }
         )
       );
     }
@@ -244,7 +276,10 @@
     btn.addEventListener("click", () => {
       const key = btn.getAttribute("data-add");
       EVENT_CONTAINERS[key].appendChild(
-        specRow({ NamedCommand: "", Delay: 0 }, { showHeartbeat: false, canRemove: true })
+        specRow(
+          { NamedCommand: "", Delay: 0 },
+          { showHeartbeat: false, canRemove: true, eventKey: key }
+        )
       );
     });
   });

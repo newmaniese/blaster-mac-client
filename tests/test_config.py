@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from blaster.config import Config, BLEConfig, DEFAULT_DEVICE_NAME
+from blaster.config import (
+    Config,
+    BLEConfig,
+    DEFAULT_DEVICE_NAME,
+    schedule_delay_seconds,
+)
 
 
 def test_from_dict_empty_uses_defaults() -> None:
@@ -174,7 +179,44 @@ def test_invalid_type_heartbeat_interval() -> None:
     }
     with pytest.raises(ValueError, match="HeartbeatInterval must be a non-negative integer"):
         Config.from_dict(data)
-        
+
+
+@pytest.mark.parametrize("interval", [45, 60])
+def test_heartbeat_interval_not_below_delay_rejected(interval: int) -> None:
+    """An interval at or above the Delay can never keep the device timer alive."""
+    data = {
+        "events": {
+            "HeartbeatStopped": {
+                "NamedCommand": "Off",
+                "Delay": 45,
+                "HeartbeatInterval": interval,
+            },
+        }
+    }
+    with pytest.raises(ValueError, match="must be less than the HeartbeatStopped Delay"):
+        Config.from_dict(data)
+
+
+def test_heartbeat_interval_zero_disables_heartbeats() -> None:
+    """Interval 0 means no heartbeats at all, so the window check does not apply."""
+    cfg = Config.from_dict({
+        "events": {
+            "HeartbeatStopped": {"NamedCommand": "Off", "Delay": 45, "HeartbeatInterval": 0},
+        }
+    })
+    assert cfg.events.HeartbeatStopped[0].HeartbeatInterval == 0
+
+
+def test_heartbeat_window_uses_effective_delay() -> None:
+    """Delay 0 means unset, so it is validated against the 900s the device is armed with."""
+    cfg = Config.from_dict({
+        "events": {
+            "HeartbeatStopped": {"NamedCommand": "Off", "Delay": 0, "HeartbeatInterval": 60},
+        }
+    })
+    assert schedule_delay_seconds(cfg.events.HeartbeatStopped[0]) == 900
+
+
 def test_default_config_path_ignores_cwd(tmp_path) -> None:
     """Ensure _default_config_path ignores config.yaml in CWD."""
     from blaster.config import _default_config_path

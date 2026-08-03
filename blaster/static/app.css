@@ -235,21 +235,52 @@ legend {
   font-size: 0.8rem;
 }
 
+.field-help {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
 .event-row {
   display: grid;
-  grid-template-columns: 1fr 4.5rem 5.5rem auto;
-  gap: 0.4rem;
-  margin-bottom: 0.4rem;
-  align-items: center;
+  grid-template-columns: minmax(6rem, 1fr) minmax(7rem, 0.9fr) auto;
+  gap: 0.5rem 0.4rem;
+  margin-bottom: 0.65rem;
+  align-items: end;
+}
+
+.event-row.event-row-hb {
+  grid-template-columns: minmax(6rem, 1fr) minmax(7rem, 0.85fr) minmax(8rem, 1fr) auto;
+}
+
+.event-row .field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.event-row .field-label {
+  letter-spacing: 0.02em;
 }
 
 .event-row input {
   width: 100%;
 }
 
-.event-row .remove {
-  padding: 0.35rem 0.5rem;
+.event-row .remove,
+.event-row .remove-spacer {
+  padding: 0.5rem 0.5rem;
   font-size: 0.75rem;
+  align-self: end;
+}
+
+.event-row .remove-spacer {
+  visibility: hidden;
+  min-width: 4.5rem;
 }
 
 .form-actions {
@@ -269,10 +300,12 @@ legend {
 
 @media (max-width: 520px) {
   .meta { grid-template-columns: 1fr 1fr; }
-  .event-row {
+  .event-row,
+  .event-row.event-row-hb {
     grid-template-columns: 1fr 1fr;
   }
-  .event-row .remove {
+  .event-row .remove,
+  .event-row .remove-spacer {
     grid-column: 1 / -1;
   }
 }
