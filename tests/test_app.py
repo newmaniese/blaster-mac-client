@@ -16,8 +16,8 @@ def _write_config(path: Path, data: dict | None = None) -> Path:
         "ble": {"device_name": "Test Blaster"},
         "events": {
             "OnConnect": [{"NamedCommand": "On", "Delay": 0}],
-            "HeartbeatStopped": [
-                {"NamedCommand": "Off", "Delay": 900, "HeartbeatInterval": 60}
+            "OnDisconnect": [
+                {"NamedCommand": "Off", "Delay": 900}
             ],
             "Active": [{"NamedCommand": "Red"}],
             "Idle": [{"NamedCommand": "Green", "Delay": 120}],
@@ -39,7 +39,6 @@ def _mock_ble(connected: bool = True) -> MagicMock:
     ble.disconnect = AsyncMock()
     ble.wait_until_ready = AsyncMock()
     ble.schedule_disconnect_command = AsyncMock()
-    ble.send_heartbeat = AsyncMock()
     ble.send_command_by_name = AsyncMock(return_value="OK:Red")
     ble.get_saved_codes = AsyncMock(
         return_value=[{"name": "Red", "index": 0}, {"name": "Green", "index": 1}]
@@ -147,8 +146,8 @@ async def test_apply_config_saves_and_restarts(config_path: Path) -> None:
                 "ble": {"device_name": "Renamed"},
                 "events": {
                     "OnConnect": [{"NamedCommand": "On", "Delay": 0}],
-                    "HeartbeatStopped": [
-                        {"NamedCommand": "Off", "Delay": 30, "HeartbeatInterval": 15}
+                    "OnDisconnect": [
+                        {"NamedCommand": "Off", "Delay": 30}
                     ],
                     "Active": [{"NamedCommand": "Red"}],
                     "Idle": [{"NamedCommand": "Green", "Delay": 5}],

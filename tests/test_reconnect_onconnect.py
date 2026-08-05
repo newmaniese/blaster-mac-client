@@ -16,7 +16,7 @@ def minimal_config(tmp_path: Path) -> tuple[Config, Path]:
     cfg = Config.from_dict({
         "events": {
             "OnConnect": {"NamedCommand": "On", "Delay": 0},
-            "HeartbeatStopped": {"NamedCommand": "Off", "Delay": 900},
+            "OnDisconnect": {"NamedCommand": "Off", "Delay": 900},
         },
     })
     path = tmp_path / "config.yaml"
@@ -43,7 +43,6 @@ async def test_onconnect_fires_on_initial_connect(minimal_config) -> None:
     mock_ble.wait_until_ready = AsyncMock()
     mock_ble.schedule_disconnect_command = AsyncMock()
     mock_ble.disconnect = AsyncMock()
-    mock_ble.send_heartbeat = AsyncMock()
     mock_ble.send_command_by_name = AsyncMock(return_value="OK:test")
     mock_ble.set_disconnect_callback = MagicMock()
     mock_ble.is_connected = True
@@ -88,7 +87,6 @@ async def test_onconnect_fires_after_reconnect(minimal_config) -> None:
     mock_ble.wait_until_ready = AsyncMock()
     mock_ble.schedule_disconnect_command = AsyncMock()
     mock_ble.disconnect = AsyncMock()
-    mock_ble.send_heartbeat = AsyncMock()
     mock_ble.send_command_by_name = AsyncMock(return_value="OK:test")
     mock_ble.set_disconnect_callback = MagicMock()
     type(mock_ble).is_connected = property(lambda self: connected[0])
@@ -124,8 +122,8 @@ async def test_onconnect_fires_after_reconnect(minimal_config) -> None:
 
 
 @pytest.mark.asyncio
-async def test_schedule_rearmed_before_onconnect_commands(minimal_config) -> None:
-    """The device timer is reset before OnConnect commands, on connect and reconnect."""
+async def test_schedule_configured_before_onconnect_commands(minimal_config) -> None:
+    """The disconnect schedule is configured before OnConnect commands, on connect and reconnect."""
     _cfg, path = minimal_config
     events: list[str] = []
 
@@ -145,7 +143,6 @@ async def test_schedule_rearmed_before_onconnect_commands(minimal_config) -> Non
         side_effect=lambda *_a, **_k: events.append("schedule")
     )
     mock_ble.disconnect = AsyncMock()
-    mock_ble.send_heartbeat = AsyncMock()
     mock_ble.send_command_by_name = AsyncMock(return_value="OK:test")
     mock_ble.set_disconnect_callback = MagicMock()
     type(mock_ble).is_connected = property(lambda self: connected[0])
@@ -160,22 +157,18 @@ async def test_schedule_rearmed_before_onconnect_commands(minimal_config) -> Non
         await ctrl.start()
         try:
             assert events[0] == "schedule", (
-                f"schedule must be armed before any commands, got {events}"
+                f"schedule must be configured before any commands, got {events}"
             )
-            hb_task = ctrl._heartbeat_task
-            assert hb_task is not None and not hb_task.done()
+            assert not hasattr(ctrl, "_heartbeat_task")
 
             events.clear()
             connected[0] = False
             await ctrl.request_reconnect()
 
             assert events[0] == "schedule", (
-                f"schedule must be re-armed before OnConnect commands, got {events}"
+                f"schedule must be re-configured before OnConnect commands, got {events}"
             )
             assert "specs:on connect" in events
-            assert ctrl._heartbeat_task is not hb_task, (
-                "heartbeat loop should be restarted on reconnect"
-            )
-            assert hb_task.cancelled() or hb_task.done()
+            mock_ble.schedule_disconnect_command.assert_called()
         finally:
             await ctrl.stop()

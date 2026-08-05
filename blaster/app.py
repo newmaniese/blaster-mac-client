@@ -37,7 +37,6 @@ class AppController:
         self.cam = False
         self.mic = False
         self._av_active = False
-        self._heartbeat_task: asyncio.Task[None] | None = None
         self._reconnect_task: asyncio.Task[None] | None = None
         self._av_task: asyncio.Task[None] | None = None
         self._tick_task: asyncio.Task[None] | None = None
@@ -48,15 +47,9 @@ class AppController:
             return float(idle[0].Delay)
         return 120.0
 
-    def _heartbeat_interval(self) -> int:
-        hb = self.config.events.HeartbeatStopped
-        if hb and hb[0].HeartbeatInterval is not None:
-            return int(hb[0].HeartbeatInterval)
-        return 60
-
-    def _hb0(self):
-        stopped = self.config.events.HeartbeatStopped
-        return stopped[0] if stopped else None
+    def _disconnect0(self):
+        specs = self.config.events.OnDisconnect
+        return specs[0] if specs else None
 
     def _on_command_sent(self, name: str, status: str) -> None:
         self.last_command = name
@@ -116,7 +109,6 @@ class AppController:
     async def stop(self) -> None:
         """Cancel tasks and disconnect cleanly."""
         self._running = False
-        await self._cancel_heartbeat()
         await self._cancel_reconnect()
         if self._av_task is not None:
             self._av_task.cancel()
@@ -180,7 +172,6 @@ class AppController:
 
     async def _safe_restart_locked(self) -> None:
         """Disconnect, rebuild BLE/SM from current config, reconnect and re-arm."""
-        await self._cancel_heartbeat()
         await self._cancel_reconnect()
         self.ble.set_disconnect_callback(None)
         await self.ble.disconnect()
@@ -221,8 +212,7 @@ class AppController:
         except TimeoutError as e:
             logger.warning("%s", sanitize_log_message(e))
             return
-        # Re-arm before OnConnect: arming resets the device timer, so any delay in
-        # the OnConnect commands cannot let the HeartbeatStopped command fire.
+        # Configure disconnect schedule before OnConnect commands.
         await self._restart_schedule()
         await execute_specs(
             self.ble,
@@ -232,32 +222,18 @@ class AppController:
         )
 
     async def _restart_schedule(self) -> None:
-        """Re-arm the device's delayed command (resetting its timer) and restart heartbeats."""
-        hb0 = self._hb0()
-        if hb0 is not None:
+        """Configure the device's disconnect-delayed command (countdown starts on disconnect)."""
+        spec = self._disconnect0()
+        if spec is not None:
             try:
                 await self.ble.schedule_disconnect_command(
-                    hb0.NamedCommand,
-                    schedule_delay_seconds(hb0),
+                    spec.NamedCommand,
+                    schedule_delay_seconds(spec),
                 )
             except (BleakError, asyncio.TimeoutError, RuntimeError) as e:
                 logger.warning(
                     "Schedule disconnect command failed: %s", sanitize_log_message(e)
                 )
-        interval = self._heartbeat_interval()
-        if interval > 0:
-            await self._cancel_heartbeat()
-            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop(interval))
-
-    async def _heartbeat_loop(self, interval: int) -> None:
-        while True:
-            await asyncio.sleep(interval)
-            if not self.ble.is_connected:
-                return
-            try:
-                await self.ble.send_heartbeat()
-            except (BleakError, asyncio.TimeoutError, RuntimeError) as e:
-                logger.debug("Heartbeat failed: %s", sanitize_log_message(e))
 
     async def _on_disconnect(self) -> None:
         logger.warning("BLE disconnected")
@@ -275,13 +251,6 @@ class AppController:
                 logger.info("Reconnecting to IR Blaster...")
                 if await self._connect_and_arm_locked():
                     return
-
-    async def _cancel_heartbeat(self) -> None:
-        if self._heartbeat_task is not None:
-            self._heartbeat_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._heartbeat_task
-            self._heartbeat_task = None
 
     async def _cancel_reconnect(self) -> None:
         if self._reconnect_task is not None:

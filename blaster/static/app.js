@@ -18,7 +18,7 @@
 
   const EVENT_CONTAINERS = {
     OnConnect: $("onconnect-rows"),
-    HeartbeatStopped: $("heartbeat-rows"),
+    OnDisconnect: $("ondisconnect-rows"),
     Active: $("active-rows"),
     Idle: $("idle-rows"),
   };
@@ -74,11 +74,9 @@
       delay: "Delay (sec)",
       delayTitle: "Seconds to wait before sending this command after connect",
     },
-    HeartbeatStopped: {
+    OnDisconnect: {
       delay: "Timeout (sec)",
-      delayTitle: "Seconds without a heartbeat before the ESP32 runs this command",
-      heartbeat: "Heartbeat interval (sec)",
-      heartbeatTitle: "How often the Mac sends a heartbeat while connected",
+      delayTitle: "Seconds after BLE disconnect before the ESP32 runs this command",
     },
     Active: {
       delay: "Delay (sec)",
@@ -92,8 +90,7 @@
 
   function specRow(spec, opts) {
     const row = document.createElement("div");
-    row.className = "event-row" + (opts.showHeartbeat ? " event-row-hb" : "");
-    const showHb = !!opts.showHeartbeat;
+    row.className = "event-row";
     const canRemove = opts.canRemove !== false;
     const labels = EVENT_FIELD_LABELS[opts.eventKey] || EVENT_FIELD_LABELS.Active;
 
@@ -106,11 +103,6 @@
         <span class="field-label">${escapeAttr(labels.delay)}</span>
         <input type="number" data-field="Delay" min="0" step="1" value="${spec.Delay ?? ""}" title="${escapeAttr(labels.delayTitle)}" aria-label="${escapeAttr(labels.delay)}">
       </label>
-      ${showHb ? `
-      <label class="field">
-        <span class="field-label">${escapeAttr(labels.heartbeat)}</span>
-        <input type="number" data-field="HeartbeatInterval" min="0" step="1" value="${spec.HeartbeatInterval ?? ""}" title="${escapeAttr(labels.heartbeatTitle)}" aria-label="${escapeAttr(labels.heartbeat)}">
-      </label>` : ""}
       ${canRemove ? '<button type="button" class="remove" aria-label="Remove">Remove</button>' : '<span class="remove-spacer"></span>'}
     `;
 
@@ -131,16 +123,15 @@
   function renderEventRows(key, specs) {
     const container = EVENT_CONTAINERS[key];
     container.innerHTML = "";
-    const showHeartbeat = key === "HeartbeatStopped";
-    const canRemove = key !== "HeartbeatStopped";
+    const canRemove = key !== "OnDisconnect";
     (specs || []).forEach((spec) => {
-      container.appendChild(specRow(spec, { showHeartbeat, canRemove, eventKey: key }));
+      container.appendChild(specRow(spec, { canRemove, eventKey: key }));
     });
     if (!specs || specs.length === 0) {
       container.appendChild(
         specRow(
           { NamedCommand: "", Delay: key === "Idle" ? 120 : 0 },
-          { showHeartbeat, canRemove, eventKey: key }
+          { canRemove, eventKey: key }
         )
       );
     }
@@ -156,12 +147,6 @@
       if (delayRaw !== "") {
         out.Delay = Number.parseInt(delayRaw, 10);
       }
-      if (key === "HeartbeatStopped") {
-        const hbRaw = row.querySelector('[data-field="HeartbeatInterval"]').value;
-        if (hbRaw !== "") {
-          out.HeartbeatInterval = Number.parseInt(hbRaw, 10);
-        }
-      }
       return out;
     }).filter((s) => s.NamedCommand);
   }
@@ -170,7 +155,7 @@
     configCache = cfg;
     deviceNameInput.value = cfg.ble?.device_name || "";
     renderEventRows("OnConnect", cfg.events?.OnConnect);
-    renderEventRows("HeartbeatStopped", cfg.events?.HeartbeatStopped);
+    renderEventRows("OnDisconnect", cfg.events?.OnDisconnect);
     renderEventRows("Active", cfg.events?.Active);
     renderEventRows("Idle", cfg.events?.Idle);
   }
@@ -278,7 +263,7 @@
       EVENT_CONTAINERS[key].appendChild(
         specRow(
           { NamedCommand: "", Delay: 0 },
-          { showHeartbeat: false, canRemove: true, eventKey: key }
+          { canRemove: true, eventKey: key }
         )
       );
     });
@@ -291,7 +276,7 @@
       ble: { device_name: deviceNameInput.value.trim() },
       events: {
         OnConnect: readEventRows("OnConnect"),
-        HeartbeatStopped: readEventRows("HeartbeatStopped"),
+        OnDisconnect: readEventRows("OnDisconnect"),
         Active: readEventRows("Active"),
         Idle: readEventRows("Idle"),
       },

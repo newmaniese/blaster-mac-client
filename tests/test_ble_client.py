@@ -352,32 +352,6 @@ class TestIRBlasterBLE(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "Not connected to IR Blaster"):
             await ble.schedule_disconnect_command("Off", 60)
 
-    async def test_send_heartbeat(self) -> None:
-        config = BLEConfig(device_name="Test Device")
-        ble = IRBlasterBLE(config)
-        mock_client = MagicMock()
-        mock_client.is_connected = True
-        mock_client.write_gatt_char = AsyncMock()
-        ble._client = mock_client
-
-        await ble.send_heartbeat()
-
-        expected = json.dumps({"heartbeat": True}).encode("utf-8")
-        mock_client.write_gatt_char.assert_called_once_with(CHAR_SCHEDULE_UUID, expected)
-
-    async def test_send_heartbeat_requires_connection(self) -> None:
-        config = BLEConfig(device_name="IR Blaster")
-        ble = IRBlasterBLE(config)
-
-        with self.assertRaisesRegex(RuntimeError, "Not connected to IR Blaster"):
-            await ble.send_heartbeat()
-
-        mock_client = AsyncMock()
-        mock_client.is_connected = False
-        ble._client = mock_client
-        with self.assertRaisesRegex(RuntimeError, "Not connected to IR Blaster"):
-            await ble.send_heartbeat()
-
     async def test_send_command_success(self) -> None:
         config = BLEConfig(device_name="Test Device")
         ble = IRBlasterBLE(config)

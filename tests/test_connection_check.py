@@ -32,10 +32,6 @@ class TestConnectionCheck(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "Not connected to IR Blaster"):
             await self.ble.schedule_disconnect_command("Off", 10)
 
-    async def test_send_heartbeat_raises_when_not_connected(self):
-        with self.assertRaisesRegex(RuntimeError, "Not connected to IR Blaster"):
-            await self.ble.send_heartbeat()
-
     async def test_send_command_raises_when_not_connected(self):
         with self.assertRaisesRegex(RuntimeError, "Not connected to IR Blaster"):
             await self.ble.send_command(1)

@@ -21,8 +21,8 @@ def _write_config(path: Path) -> Path:
                 "ble": {"device_name": "API Blaster"},
                 "events": {
                     "OnConnect": [{"NamedCommand": "On", "Delay": 0}],
-                    "HeartbeatStopped": [
-                        {"NamedCommand": "Off", "Delay": 900, "HeartbeatInterval": 60}
+                    "OnDisconnect": [
+                        {"NamedCommand": "Off", "Delay": 900}
                     ],
                     "Active": [{"NamedCommand": "Red"}],
                     "Idle": [{"NamedCommand": "Green", "Delay": 120}],
@@ -53,7 +53,6 @@ async def client(tmp_path: Path):
         ble.disconnect = AsyncMock()
         ble.wait_until_ready = AsyncMock()
         ble.schedule_disconnect_command = AsyncMock()
-        ble.send_heartbeat = AsyncMock()
         ble.send_command_by_name = AsyncMock(return_value="OK:Red")
         ble.get_saved_codes = AsyncMock(
             return_value=[{"n": "Red", "i": 0}, {"n": "Green", "i": 1}]

@@ -58,9 +58,9 @@
         </fieldset>
 
         <fieldset>
-          <legend>Heartbeat stopped</legend>
-          <p class="field-help">If the Mac stops heartbeating, the ESP32 runs this command after Delay seconds. Heartbeat interval is how often (seconds) the client pings while connected, and must be less than Delay.</p>
-          <div class="event-rows" id="heartbeat-rows"></div>
+          <legend>On disconnect</legend>
+          <p class="field-help">After BLE disconnect, the ESP32 runs this command following Delay seconds. Reconnect cancels the countdown.</p>
+          <div class="event-rows" id="ondisconnect-rows"></div>
         </fieldset>
 
         <fieldset>

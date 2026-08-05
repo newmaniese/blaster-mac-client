@@ -250,10 +250,6 @@ legend {
   align-items: end;
 }
 
-.event-row.event-row-hb {
-  grid-template-columns: minmax(6rem, 1fr) minmax(7rem, 0.85fr) minmax(8rem, 1fr) auto;
-}
-
 .event-row .field {
   display: flex;
   flex-direction: column;
@@ -300,8 +296,7 @@ legend {
 
 @media (max-width: 520px) {
   .meta { grid-template-columns: 1fr 1fr; }
-  .event-row,
-  .event-row.event-row-hb {
+  .event-row {
     grid-template-columns: 1fr 1fr;
   }
   .event-row .remove,

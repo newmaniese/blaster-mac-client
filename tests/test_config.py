@@ -6,7 +6,6 @@ import pytest
 
 from blaster.config import (
     Config,
-    BLEConfig,
     DEFAULT_DEVICE_NAME,
     schedule_delay_seconds,
 )
@@ -18,10 +17,9 @@ def test_from_dict_empty_uses_defaults() -> None:
     assert len(cfg.events.OnConnect) == 1
     assert cfg.events.OnConnect[0].NamedCommand == "On"
     assert cfg.events.OnConnect[0].Delay == 0
-    assert len(cfg.events.HeartbeatStopped) == 1
-    assert cfg.events.HeartbeatStopped[0].NamedCommand == "Off"
-    assert cfg.events.HeartbeatStopped[0].Delay == 900
-    assert cfg.events.HeartbeatStopped[0].HeartbeatInterval == 60
+    assert len(cfg.events.OnDisconnect) == 1
+    assert cfg.events.OnDisconnect[0].NamedCommand == "Off"
+    assert cfg.events.OnDisconnect[0].Delay == 900
     assert len(cfg.events.Active) == 1
     assert cfg.events.Active[0].NamedCommand == "Red"
     assert len(cfg.events.Idle) == 1
@@ -34,15 +32,15 @@ def test_from_dict_partial() -> None:
         "ble": {"device_name": "My Blaster"},
         "events": {
             "OnConnect": {"NamedCommand": "PowerOn"},
-            "HeartbeatStopped": {"Delay": 600},
+            "OnDisconnect": {"Delay": 600},
         },
     })
     assert cfg.ble.device_name == "My Blaster"
     assert len(cfg.events.OnConnect) == 1
     assert cfg.events.OnConnect[0].NamedCommand == "PowerOn"
     assert cfg.events.OnConnect[0].Delay == 0
-    assert cfg.events.HeartbeatStopped[0].Delay == 600
-    assert cfg.events.HeartbeatStopped[0].NamedCommand == "Off"
+    assert cfg.events.OnDisconnect[0].Delay == 600
+    assert cfg.events.OnDisconnect[0].NamedCommand == "Off"
     assert cfg.events.Active[0].NamedCommand == "Red"
     assert cfg.events.Idle[0].Delay == 120
 
@@ -52,7 +50,7 @@ def test_from_dict_full() -> None:
         "ble": {"device_name": "IR Blaster"},
         "events": {
             "OnConnect": {"NamedCommand": "On", "Delay": 5},
-            "HeartbeatStopped": {"NamedCommand": "Off", "Delay": 900, "HeartbeatInterval": 45},
+            "OnDisconnect": {"NamedCommand": "Off", "Delay": 900},
             "Active": {"NamedCommand": "Red"},
             "Idle": {"NamedCommand": "Green", "Delay": 90},
         },
@@ -61,9 +59,8 @@ def test_from_dict_full() -> None:
     assert len(cfg.events.OnConnect) == 1
     assert cfg.events.OnConnect[0].NamedCommand == "On"
     assert cfg.events.OnConnect[0].Delay == 5
-    assert cfg.events.HeartbeatStopped[0].NamedCommand == "Off"
-    assert cfg.events.HeartbeatStopped[0].Delay == 900
-    assert cfg.events.HeartbeatStopped[0].HeartbeatInterval == 45
+    assert cfg.events.OnDisconnect[0].NamedCommand == "Off"
+    assert cfg.events.OnDisconnect[0].Delay == 900
     assert cfg.events.Active[0].NamedCommand == "Red"
     assert cfg.events.Idle[0].NamedCommand == "Green"
     assert cfg.events.Idle[0].Delay == 90
@@ -86,11 +83,11 @@ def test_on_connect_multiple_commands() -> None:
 
 
 def test_all_events_as_lists() -> None:
-    """All events accept list format; HeartbeatStopped first spec has HeartbeatInterval."""
+    """All events accept list format."""
     cfg = Config.from_dict({
         "events": {
-            "HeartbeatStopped": [
-                {"NamedCommand": "Off", "Delay": 900, "HeartbeatInterval": 30},
+            "OnDisconnect": [
+                {"NamedCommand": "Off", "Delay": 900},
             ],
             "Active": [
                 {"NamedCommand": "Red"},
@@ -101,8 +98,8 @@ def test_all_events_as_lists() -> None:
             ],
         },
     })
-    assert len(cfg.events.HeartbeatStopped) == 1
-    assert cfg.events.HeartbeatStopped[0].HeartbeatInterval == 30
+    assert len(cfg.events.OnDisconnect) == 1
+    assert cfg.events.OnDisconnect[0].Delay == 900
     assert len(cfg.events.Active) == 2
     assert cfg.events.Active[0].NamedCommand == "Red"
     assert cfg.events.Active[1].NamedCommand == "Dim"
@@ -137,6 +134,7 @@ def test_load_missing_file_raises() -> None:
     with pytest.raises(FileNotFoundError):
         Config.load("/nonexistent/config.yaml")
 
+
 def test_negative_delay_validation() -> None:
     """Ensure that negative Delay raises ValueError."""
     data = {
@@ -145,17 +143,6 @@ def test_negative_delay_validation() -> None:
         }
     }
     with pytest.raises(ValueError, match="Delay must be a non-negative integer"):
-        Config.from_dict(data)
-
-
-def test_negative_heartbeat_interval_validation() -> None:
-    """Ensure that negative HeartbeatInterval raises ValueError."""
-    data = {
-        "events": {
-            "HeartbeatStopped": {"NamedCommand": "Off", "HeartbeatInterval": -60},
-        }
-    }
-    with pytest.raises(ValueError, match="HeartbeatInterval must be a non-negative integer"):
         Config.from_dict(data)
 
 
@@ -170,51 +157,14 @@ def test_invalid_type_delay() -> None:
         Config.from_dict(data)
 
 
-def test_invalid_type_heartbeat_interval() -> None:
-    """Ensure that non-integer HeartbeatInterval raises ValueError."""
-    data = {
-        "events": {
-            "HeartbeatStopped": {"NamedCommand": "Off", "HeartbeatInterval": "invalid"},
-        }
-    }
-    with pytest.raises(ValueError, match="HeartbeatInterval must be a non-negative integer"):
-        Config.from_dict(data)
-
-
-@pytest.mark.parametrize("interval", [45, 60])
-def test_heartbeat_interval_not_below_delay_rejected(interval: int) -> None:
-    """An interval at or above the Delay can never keep the device timer alive."""
-    data = {
-        "events": {
-            "HeartbeatStopped": {
-                "NamedCommand": "Off",
-                "Delay": 45,
-                "HeartbeatInterval": interval,
-            },
-        }
-    }
-    with pytest.raises(ValueError, match="must be less than the HeartbeatStopped Delay"):
-        Config.from_dict(data)
-
-
-def test_heartbeat_interval_zero_disables_heartbeats() -> None:
-    """Interval 0 means no heartbeats at all, so the window check does not apply."""
+def test_schedule_delay_zero_uses_default() -> None:
+    """Delay 0 means unset, so the device is configured with the 900s default."""
     cfg = Config.from_dict({
         "events": {
-            "HeartbeatStopped": {"NamedCommand": "Off", "Delay": 45, "HeartbeatInterval": 0},
+            "OnDisconnect": {"NamedCommand": "Off", "Delay": 0},
         }
     })
-    assert cfg.events.HeartbeatStopped[0].HeartbeatInterval == 0
-
-
-def test_heartbeat_window_uses_effective_delay() -> None:
-    """Delay 0 means unset, so it is validated against the 900s the device is armed with."""
-    cfg = Config.from_dict({
-        "events": {
-            "HeartbeatStopped": {"NamedCommand": "Off", "Delay": 0, "HeartbeatInterval": 60},
-        }
-    })
-    assert schedule_delay_seconds(cfg.events.HeartbeatStopped[0]) == 900
+    assert schedule_delay_seconds(cfg.events.OnDisconnect[0]) == 900
 
 
 def test_default_config_path_ignores_cwd(tmp_path) -> None:
@@ -225,48 +175,39 @@ def test_default_config_path_ignores_cwd(tmp_path) -> None:
     original_cwd = os.getcwd()
     os.chdir(tmp_path)
     try:
-        # Create a "malicious" config in CWD
         (tmp_path / "config.yaml").write_text("ble: {device_name: Malicious}")
 
-        # Call _default_config_path
         path = _default_config_path()
 
-        # Assert it's NOT the one in CWD
         assert path != tmp_path / "config.yaml"
-
-        # It should be an absolute path ending in config.yaml
         assert path.name == "config.yaml"
         assert path.is_absolute()
     finally:
         os.chdir(original_cwd)
-        
-        
+
+
 def test_string_only_event_spec() -> None:
     """Test events defined as strings in a list (not dicts)."""
     cfg = Config.from_dict({
         "events": {
             "Active": ["Red", "Blue"],
             "Idle": ["Green"],
-            "HeartbeatStopped": ["MyOff"],
+            "OnDisconnect": ["MyOff"],
         },
     })
-    # Active
     assert len(cfg.events.Active) == 2
     assert cfg.events.Active[0].NamedCommand == "Red"
     assert cfg.events.Active[0].Delay == 0
     assert cfg.events.Active[1].NamedCommand == "Blue"
     assert cfg.events.Active[1].Delay == 0
 
-    # Idle
     assert len(cfg.events.Idle) == 1
     assert cfg.events.Idle[0].NamedCommand == "Green"
-    assert cfg.events.Idle[0].Delay == 0  # String spec always has delay 0
+    assert cfg.events.Idle[0].Delay == 0
 
-    # HeartbeatStopped
-    assert len(cfg.events.HeartbeatStopped) == 1
-    assert cfg.events.HeartbeatStopped[0].NamedCommand == "MyOff"
-    assert cfg.events.HeartbeatStopped[0].Delay == 0
-    assert cfg.events.HeartbeatStopped[0].HeartbeatInterval == 60  # Default HBI preserved
+    assert len(cfg.events.OnDisconnect) == 1
+    assert cfg.events.OnDisconnect[0].NamedCommand == "MyOff"
+    assert cfg.events.OnDisconnect[0].Delay == 0
 
 
 def test_to_dict_round_trip() -> None:
@@ -277,8 +218,8 @@ def test_to_dict_round_trip() -> None:
                 {"NamedCommand": "On", "Delay": 0},
                 {"NamedCommand": "Green", "Delay": 2},
             ],
-            "HeartbeatStopped": [
-                {"NamedCommand": "Off", "Delay": 45, "HeartbeatInterval": 30},
+            "OnDisconnect": [
+                {"NamedCommand": "Off", "Delay": 45},
             ],
             "Active": [{"NamedCommand": "Red"}],
             "Idle": [{"NamedCommand": "Green", "Delay": 10}],
@@ -288,9 +229,9 @@ def test_to_dict_round_trip() -> None:
     assert again.ble.device_name == "RoundTrip"
     assert again.events.OnConnect[1].NamedCommand == "Green"
     assert again.events.OnConnect[1].Delay == 2
-    assert again.events.HeartbeatStopped[0].Delay == 45
-    assert again.events.HeartbeatStopped[0].HeartbeatInterval == 30
+    assert again.events.OnDisconnect[0].Delay == 45
     assert again.events.Idle[0].Delay == 10
+    assert "HeartbeatInterval" not in cfg.to_dict()["events"]["OnDisconnect"][0]
 
 
 def test_save_and_load_file(tmp_path: Path) -> None:

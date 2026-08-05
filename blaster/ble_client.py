@@ -1,6 +1,6 @@
 """
 BLE client for IR Blaster: scan by name, connect, send_command by index or name,
-schedule/heartbeat, auto-reconnect (bleak).
+schedule/disconnect schedule, auto-reconnect (bleak).
 """
 from __future__ import annotations
 
@@ -174,19 +174,13 @@ class IRBlasterBLE:
         return await self.send_command(self._name_to_index[key])
 
     async def schedule_disconnect_command(self, command_name: str, delay_seconds: int) -> None:
-        """Arm the ESP32 to run the given command after delay_seconds unless heartbeat resets it."""
+        """Configure the ESP32 to run command_name delay_seconds after BLE disconnect."""
         self._ensure_connected()
         if not isinstance(delay_seconds, int):
             raise TypeError("delay_seconds must be an integer")
         if delay_seconds < 0:
             raise ValueError("delay_seconds must be non-negative")
         payload = json.dumps({"delay_seconds": delay_seconds, "command": command_name})
-        await self._client.write_gatt_char(CHAR_SCHEDULE_UUID, payload.encode("utf-8"))
-
-    async def send_heartbeat(self) -> None:
-        """Reset the ESP32 delayed-command timer."""
-        self._ensure_connected()
-        payload = json.dumps({"heartbeat": True})
         await self._client.write_gatt_char(CHAR_SCHEDULE_UUID, payload.encode("utf-8"))
 
     async def send_command(self, index: int) -> str:

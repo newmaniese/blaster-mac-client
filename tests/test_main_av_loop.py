@@ -56,8 +56,8 @@ class TestMainAVLoop(unittest.IsolatedAsyncioTestCase):
                 "ble": {"device_name": "Test"},
                 "events": {
                     "OnConnect": [{"NamedCommand": "On", "Delay": 0}],
-                    "HeartbeatStopped": [
-                        {"NamedCommand": "Off", "Delay": 900, "HeartbeatInterval": 60}
+                    "OnDisconnect": [
+                        {"NamedCommand": "Off", "Delay": 900}
                     ],
                     "Active": [{"NamedCommand": "Red"}],
                     "Idle": [{"NamedCommand": "Green", "Delay": 120}],

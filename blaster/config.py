@@ -11,13 +11,13 @@ import yaml
 
 DEFAULT_DEVICE_NAME = "IR Blaster"
 
-# Event defaults (NamedCommand, Delay, HeartbeatInterval)
-DEFAULT_ON_CONNECT = ("On", 0, None)
-DEFAULT_HEARTBEAT_STOPPED = ("Off", 900, 60)
-DEFAULT_ACTIVE = ("Red", None, None)
-DEFAULT_IDLE = ("Green", 120, None)
+# Event defaults (NamedCommand, Delay)
+DEFAULT_ON_CONNECT = ("On", 0)
+DEFAULT_ON_DISCONNECT = ("Off", 900)
+DEFAULT_ACTIVE = ("Red", None)
+DEFAULT_IDLE = ("Green", 120)
 
-# A HeartbeatStopped Delay of 0 or None means "unset"; the device is armed with this.
+# An OnDisconnect Delay of 0 or None means "unset"; the device is configured with this.
 DEFAULT_SCHEDULE_DELAY_SECONDS = 900
 
 
@@ -28,17 +28,16 @@ class BLEConfig:
 
 @dataclass
 class EventSpec:
-    """One event: NamedCommand and optional Delay / HeartbeatInterval."""
+    """One event: NamedCommand and optional Delay."""
     NamedCommand: str
     Delay: int | None = None
-    HeartbeatInterval: int | None = None
 
 
 @dataclass
 class EventsConfig:
     """All events are lists of { NamedCommand, Delay? }; multiple commands run in order with per-command delays."""
     OnConnect: list[EventSpec]
-    HeartbeatStopped: list[EventSpec]  # first spec used for schedule + HeartbeatInterval
+    OnDisconnect: list[EventSpec]  # first spec used for disconnect schedule
     Active: list[EventSpec]
     Idle: list[EventSpec]
 
@@ -63,11 +62,10 @@ class Config:
 
         events = EventsConfig(
             OnConnect=_parse_event_specs(events_data, "OnConnect", DEFAULT_ON_CONNECT),
-            HeartbeatStopped=_parse_event_specs(events_data, "HeartbeatStopped", DEFAULT_HEARTBEAT_STOPPED, allow_heartbeat_interval=True),
+            OnDisconnect=_parse_event_specs(events_data, "OnDisconnect", DEFAULT_ON_DISCONNECT),
             Active=_parse_event_specs(events_data, "Active", DEFAULT_ACTIVE),
             Idle=_parse_event_specs(events_data, "Idle", DEFAULT_IDLE),
         )
-        _validate_heartbeat_window(events.HeartbeatStopped)
 
         return cls(
             ble=BLEConfig(
@@ -82,10 +80,7 @@ class Config:
             "ble": {"device_name": self.ble.device_name},
             "events": {
                 "OnConnect": [_spec_to_dict(s) for s in self.events.OnConnect],
-                "HeartbeatStopped": [
-                    _spec_to_dict(s, include_heartbeat=True)
-                    for s in self.events.HeartbeatStopped
-                ],
+                "OnDisconnect": [_spec_to_dict(s) for s in self.events.OnDisconnect],
                 "Active": [_spec_to_dict(s) for s in self.events.Active],
                 "Idle": [_spec_to_dict(s) for s in self.events.Idle],
             },
@@ -106,16 +101,14 @@ def _parse_one_spec(
     raw_item: dict[str, Any] | str | None,
     default_cmd: str,
     default_delay: int | None,
-    default_hbi: int | None = None,
 ) -> EventSpec:
     if raw_item is None:
         return EventSpec(
             NamedCommand=default_cmd,
             Delay=default_delay if default_delay is not None else 0,
-            HeartbeatInterval=default_hbi,
         )
     if isinstance(raw_item, str):
-        return EventSpec(NamedCommand=raw_item, Delay=0, HeartbeatInterval=default_hbi)
+        return EventSpec(NamedCommand=raw_item, Delay=0)
     cmd = raw_item.get("NamedCommand") or default_cmd
 
     if "Delay" in raw_item:
@@ -125,67 +118,38 @@ def _parse_one_spec(
     else:
         delay = default_delay if default_delay is not None else 0
 
-    if "HeartbeatInterval" in raw_item:
-        hbi = raw_item["HeartbeatInterval"]
-        if hbi is not None and (type(hbi) is not int or hbi < 0):
-            raise ValueError(f"HeartbeatInterval must be a non-negative integer, got {hbi!r}")
-    else:
-        hbi = default_hbi
-
-    return EventSpec(NamedCommand=cmd, Delay=delay, HeartbeatInterval=hbi)
+    return EventSpec(NamedCommand=cmd, Delay=delay)
 
 
 def _parse_event_specs(
     events_data: dict[str, Any],
     key: str,
-    default: tuple[str, int | None, int | None],
-    allow_heartbeat_interval: bool = False,
+    default: tuple[str, int | None],
 ) -> list[EventSpec]:
     raw = events_data.get(key)
-    default_cmd, default_delay, default_hbi = default[0], default[1], default[2]
+    default_cmd, default_delay = default[0], default[1]
     if raw is None:
-        return [_parse_one_spec(None, default_cmd, default_delay, default_hbi if allow_heartbeat_interval else None)]
+        return [_parse_one_spec(None, default_cmd, default_delay)]
     if isinstance(raw, str):
-        return [EventSpec(NamedCommand=raw, Delay=0, HeartbeatInterval=default_hbi if allow_heartbeat_interval else None)]
+        return [EventSpec(NamedCommand=raw, Delay=0)]
     if isinstance(raw, list):
         out: list[EventSpec] = []
         for i, item in enumerate(raw):
-            hbi = (default_hbi if allow_heartbeat_interval and i == 0 else None)
-            out.append(_parse_one_spec(item, default_cmd, default_delay if i == 0 else 0, hbi))
+            out.append(_parse_one_spec(item, default_cmd, default_delay if i == 0 else 0))
         return out
     # single dict (backward compat)
-    return [_parse_one_spec(raw, default_cmd, default_delay, default_hbi if allow_heartbeat_interval else None)]
+    return [_parse_one_spec(raw, default_cmd, default_delay)]
 
 
 def schedule_delay_seconds(spec: EventSpec) -> int:
-    """Countdown the device is armed with for a HeartbeatStopped spec."""
+    """Countdown the device starts on disconnect for an OnDisconnect spec."""
     return spec.Delay or DEFAULT_SCHEDULE_DELAY_SECONDS
 
 
-def _validate_heartbeat_window(specs: list[EventSpec]) -> None:
-    """
-    The client must heartbeat faster than the device's countdown. With an interval at
-    or above the delay, the ESP32 window expires before the first heartbeat arrives and
-    the command runs on every connection. An interval of 0 disables heartbeats entirely.
-    """
-    hb = specs[0] if specs else None
-    if hb is None or not hb.HeartbeatInterval:
-        return
-    delay = schedule_delay_seconds(hb)
-    if hb.HeartbeatInterval >= delay:
-        raise ValueError(
-            f"HeartbeatInterval ({hb.HeartbeatInterval}s) must be less than the "
-            f"HeartbeatStopped Delay ({delay}s), otherwise {hb.NamedCommand!r} "
-            f"runs even while the Mac is connected"
-        )
-
-
-def _spec_to_dict(spec: EventSpec, include_heartbeat: bool = False) -> dict[str, Any]:
+def _spec_to_dict(spec: EventSpec) -> dict[str, Any]:
     out: dict[str, Any] = {"NamedCommand": spec.NamedCommand}
     if spec.Delay is not None:
         out["Delay"] = spec.Delay
-    if include_heartbeat and spec.HeartbeatInterval is not None:
-        out["HeartbeatInterval"] = spec.HeartbeatInterval
     return out
 
 

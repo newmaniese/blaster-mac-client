@@ -6,10 +6,9 @@ events:
     Delay: 0
   - NamedCommand: Green
     Delay: 2
-  HeartbeatStopped:
+  OnDisconnect:
   - NamedCommand: 'Off'
     Delay: 45
-    HeartbeatInterval: 15
   Active:
   - NamedCommand: Red
     Delay: 0
