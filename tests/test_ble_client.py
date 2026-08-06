@@ -26,69 +26,124 @@ from blaster.config import BLEConfig
 from blaster.ble_client import CHAR_SCHEDULE_UUID, CHAR_SEND_UUID, IRBlasterBLE, find_device
 
 
+def _discovered(*entries: tuple[str, str, str | None]) -> dict:
+    """Build a discover(return_adv=True) result: (address, cached_name, advertised_name)."""
+    result = {}
+    for address, cached_name, advertised_name in entries:
+        device = BLEDevice(address=address, name=cached_name, details={})
+        adv = MagicMock()
+        adv.local_name = advertised_name
+        result[address] = (device, adv)
+    return result
+
+
 class TestFindDevice(unittest.IsolatedAsyncioTestCase):
     async def test_find_device_found(self) -> None:
         config = BLEConfig(device_name="IR Blaster")
-        mock_device = BLEDevice(address="00:11:22:33:44:55", name="IR Blaster", details={})
 
         with patch("blaster.ble_client.BleakScanner.discover", new_callable=AsyncMock) as mock_discover:
-            mock_discover.return_value = [mock_device]
+            mock_discover.return_value = _discovered(
+                ("00:11:22:33:44:55", "IR Blaster", "IR Blaster")
+            )
 
             device = await find_device(config)
 
             assert device is not None
-            assert device.name == "IR Blaster"
             assert device.address == "00:11:22:33:44:55"
-            mock_discover.assert_called_once_with(timeout=10.0)
+            mock_discover.assert_called_once_with(timeout=10.0, return_adv=True)
 
     async def test_find_device_not_found(self) -> None:
         config = BLEConfig(device_name="IR Blaster")
-        mock_device = BLEDevice(address="AA:BB:CC:DD:EE:FF", name="Other Device", details={})
 
         with patch("blaster.ble_client.BleakScanner.discover", new_callable=AsyncMock) as mock_discover:
-            mock_discover.return_value = [mock_device]
+            mock_discover.return_value = _discovered(
+                ("AA:BB:CC:DD:EE:FF", "Other Device", "Other Device")
+            )
 
             device = await find_device(config)
 
             assert device is None
-            mock_discover.assert_called_once_with(timeout=10.0)
+            mock_discover.assert_called_once_with(timeout=10.0, return_adv=True)
 
     async def test_find_device_empty(self) -> None:
         config = BLEConfig(device_name="IR Blaster")
 
         with patch("blaster.ble_client.BleakScanner.discover", new_callable=AsyncMock) as mock_discover:
-            mock_discover.return_value = []
+            mock_discover.return_value = {}
 
             device = await find_device(config)
 
             assert device is None
-            mock_discover.assert_called_once_with(timeout=10.0)
+            mock_discover.assert_called_once_with(timeout=10.0, return_adv=True)
 
     async def test_find_device_case_insensitive(self) -> None:
         config = BLEConfig(device_name="ir blaster")
-        mock_device = BLEDevice(address="00:11:22:33:44:55", name="IR Blaster", details={})
 
         with patch("blaster.ble_client.BleakScanner.discover", new_callable=AsyncMock) as mock_discover:
-            mock_discover.return_value = [mock_device]
+            mock_discover.return_value = _discovered(
+                ("00:11:22:33:44:55", "IR Blaster", "IR Blaster")
+            )
 
             device = await find_device(config)
 
             assert device is not None
-            assert device.name == "IR Blaster"
-            mock_discover.assert_called_once_with(timeout=10.0)
+            assert device.address == "00:11:22:33:44:55"
+            mock_discover.assert_called_once_with(timeout=10.0, return_adv=True)
 
     async def test_find_device_partial_match(self) -> None:
         config = BLEConfig(device_name="Blaster")
-        mock_device = BLEDevice(address="00:11:22:33:44:55", name="My IR Blaster", details={})
 
         with patch("blaster.ble_client.BleakScanner.discover", new_callable=AsyncMock) as mock_discover:
-            mock_discover.return_value = [mock_device]
+            mock_discover.return_value = _discovered(
+                ("00:11:22:33:44:55", "My IR Blaster", "My IR Blaster")
+            )
 
             device = await find_device(config)
 
             # Fix: partial match no longer allowed
             assert device is None
-            mock_discover.assert_called_once_with(timeout=10.0)
+            mock_discover.assert_called_once_with(timeout=10.0, return_adv=True)
+
+    async def test_find_device_matches_renamed_device(self) -> None:
+        """macOS keeps a stale cached name after a rename; the advertisement wins."""
+        config = BLEConfig(device_name="Michael's Meeting Light")
+
+        with patch("blaster.ble_client.BleakScanner.discover", new_callable=AsyncMock) as mock_discover:
+            mock_discover.return_value = _discovered(
+                ("00:11:22:33:44:55", "IR Blaster", "Michael's Meeting Light")
+            )
+
+            device = await find_device(config)
+
+            assert device is not None
+            assert device.address == "00:11:22:33:44:55"
+
+    async def test_find_device_ignores_stale_cached_name(self) -> None:
+        """A device whose cached name still matches must not be picked once renamed."""
+        config = BLEConfig(device_name="IR Blaster")
+
+        with patch("blaster.ble_client.BleakScanner.discover", new_callable=AsyncMock) as mock_discover:
+            mock_discover.return_value = _discovered(
+                ("00:11:22:33:44:55", "IR Blaster", "Michael's Meeting Light")
+            )
+
+            device = await find_device(config)
+
+            assert device is None
+
+    async def test_find_device_skips_devices_without_advertised_name(self) -> None:
+        config = BLEConfig(device_name="IR Blaster")
+
+        with patch("blaster.ble_client.BleakScanner.discover", new_callable=AsyncMock) as mock_discover:
+            mock_discover.return_value = _discovered(
+                ("AA:BB:CC:DD:EE:FF", "IR Blaster", None),
+                ("00:11:22:33:44:55", "IR Blaster", "IR Blaster"),
+            )
+
+            device = await find_device(config)
+
+            assert device is not None
+            assert device.address == "00:11:22:33:44:55"
 
 
 class TestIRBlasterBLE(unittest.IsolatedAsyncioTestCase):

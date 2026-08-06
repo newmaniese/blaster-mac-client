@@ -19,6 +19,8 @@ from blaster.utils import execute_specs, sanitize_log_message
 
 logger = logging.getLogger("blaster")
 
+RECONNECT_INTERVAL_SECONDS = 5.0
+
 
 class AppController:
     """Long-lived controller for BLE + AV state + status for the HTTP UI."""
@@ -90,6 +92,7 @@ class AppController:
                 "Could not find or connect to IR Blaster. Ensure it is on and paired."
             )
             logger.error("%s", self._error)
+            self._ensure_reconnect_task()
         else:
             self._error = None
             await self._run_after_connect()
@@ -191,6 +194,7 @@ class AppController:
                     "Could not find or connect to IR Blaster. Ensure it is on and paired."
                 )
                 logger.error("%s", self._error)
+                self._ensure_reconnect_task()
                 return False
             self._error = None
             await self._run_after_connect()
@@ -237,12 +241,18 @@ class AppController:
 
     async def _on_disconnect(self) -> None:
         logger.warning("BLE disconnected")
+        self._ensure_reconnect_task()
+
+    def _ensure_reconnect_task(self) -> None:
+        """Start the retry loop unless one is already running."""
+        if not self._running:
+            return
         if self._reconnect_task is None or self._reconnect_task.done():
             self._reconnect_task = asyncio.create_task(self._auto_reconnect())
 
     async def _auto_reconnect(self) -> None:
         while self._running:
-            await asyncio.sleep(5.0)
+            await asyncio.sleep(RECONNECT_INTERVAL_SECONDS)
             if self.ble.is_connected:
                 return
             async with self._lock:

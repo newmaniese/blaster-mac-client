@@ -27,13 +27,20 @@ logger = logging.getLogger(__name__)
 
 
 async def find_device(config: BLEConfig) -> BLEDevice | None:
-    """Scan for the IR Blaster by name. Returns the first matching device or None."""
+    """
+    Scan for the IR Blaster by advertised name. Returns the first match or None.
+
+    Matches the local name from the advertisement rather than BLEDevice.name,
+    which on macOS is a CoreBluetooth cache that keeps reporting the previous
+    name after the device is renamed.
+    """
     logger.info("Scanning for BLE device %s...", config.device_name)
-    devices = await BleakScanner.discover(timeout=10.0)
-    for d in devices:
-        if d.name and config.device_name.lower() == d.name.lower():
-            logger.info("Found %s at %s", sanitize_log_message(d.name), d.address)
-            return d
+    discovered = await BleakScanner.discover(timeout=10.0, return_adv=True)
+    for device, adv in discovered.values():
+        local_name = adv.local_name
+        if local_name and config.device_name.lower() == local_name.lower():
+            logger.info("Found %s at %s", sanitize_log_message(local_name), device.address)
+            return device
     logger.warning("Device %s not found", sanitize_log_message(config.device_name))
     return None
 
