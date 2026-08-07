@@ -54,7 +54,8 @@ uninstall:
 	./uninstall.sh
 
 # Stage a clean tree, then zip with a top-level blaster-mac-client/ folder
-# so recipients can follow QUICKSTART.txt (cd blaster-mac-client && ./run.sh).
+# so recipients can follow QUICKSTART.txt (cd … && ./install.sh). Attach the
+# zip to a GitHub Release for distribution.
 package:
 	mkdir -p $(DIST)
 	rm -rf $(DIST)/.stage $(ZIP)

@@ -23,7 +23,13 @@ except ImportError:
     mock_bleak_backends_device.BLEDevice = BLEDevice
 
 from blaster.config import BLEConfig
-from blaster.ble_client import CHAR_SCHEDULE_UUID, CHAR_SEND_UUID, IRBlasterBLE, find_device
+from blaster.ble_client import (
+    CHAR_SCHEDULE_UUID,
+    CHAR_SEND_UUID,
+    IRBlasterBLE,
+    SCAN_TIMEOUT_SECONDS,
+    find_device,
+)
 
 
 def _discovered(*entries: tuple[str, str, str | None]) -> dict:
@@ -50,7 +56,7 @@ class TestFindDevice(unittest.IsolatedAsyncioTestCase):
 
             assert device is not None
             assert device.address == "00:11:22:33:44:55"
-            mock_discover.assert_called_once_with(timeout=10.0, return_adv=True)
+            mock_discover.assert_called_once_with(timeout=SCAN_TIMEOUT_SECONDS, return_adv=True)
 
     async def test_find_device_not_found(self) -> None:
         config = BLEConfig(device_name="IR Blaster")
@@ -63,7 +69,7 @@ class TestFindDevice(unittest.IsolatedAsyncioTestCase):
             device = await find_device(config)
 
             assert device is None
-            mock_discover.assert_called_once_with(timeout=10.0, return_adv=True)
+            mock_discover.assert_called_once_with(timeout=SCAN_TIMEOUT_SECONDS, return_adv=True)
 
     async def test_find_device_empty(self) -> None:
         config = BLEConfig(device_name="IR Blaster")
@@ -74,7 +80,7 @@ class TestFindDevice(unittest.IsolatedAsyncioTestCase):
             device = await find_device(config)
 
             assert device is None
-            mock_discover.assert_called_once_with(timeout=10.0, return_adv=True)
+            mock_discover.assert_called_once_with(timeout=SCAN_TIMEOUT_SECONDS, return_adv=True)
 
     async def test_find_device_case_insensitive(self) -> None:
         config = BLEConfig(device_name="ir blaster")
@@ -88,7 +94,7 @@ class TestFindDevice(unittest.IsolatedAsyncioTestCase):
 
             assert device is not None
             assert device.address == "00:11:22:33:44:55"
-            mock_discover.assert_called_once_with(timeout=10.0, return_adv=True)
+            mock_discover.assert_called_once_with(timeout=SCAN_TIMEOUT_SECONDS, return_adv=True)
 
     async def test_find_device_partial_match(self) -> None:
         config = BLEConfig(device_name="Blaster")
@@ -102,7 +108,7 @@ class TestFindDevice(unittest.IsolatedAsyncioTestCase):
 
             # Fix: partial match no longer allowed
             assert device is None
-            mock_discover.assert_called_once_with(timeout=10.0, return_adv=True)
+            mock_discover.assert_called_once_with(timeout=SCAN_TIMEOUT_SECONDS, return_adv=True)
 
     async def test_find_device_matches_renamed_device(self) -> None:
         """macOS keeps a stale cached name after a rename; the advertisement wins."""
@@ -144,6 +150,54 @@ class TestFindDevice(unittest.IsolatedAsyncioTestCase):
 
             assert device is not None
             assert device.address == "00:11:22:33:44:55"
+
+    async def test_find_device_hard_timeout(self) -> None:
+        """A wedged BleakScanner.discover must not hang reconnect forever."""
+        config = BLEConfig(device_name="IR Blaster")
+
+        async def hang(*_args, **_kwargs):
+            await asyncio.sleep(60)
+
+        with (
+            patch("blaster.ble_client.BleakScanner.discover", side_effect=hang),
+            patch("blaster.ble_client.SCAN_HARD_TIMEOUT_SECONDS", 0.05),
+        ):
+            started = asyncio.get_running_loop().time()
+            device = await find_device(config)
+            elapsed = asyncio.get_running_loop().time() - started
+
+            assert device is None
+            assert elapsed < 2.0
+
+    async def test_connect_hard_timeout(self) -> None:
+        """A wedged BleakClient.connect must return False so reconnect can retry."""
+        config = BLEConfig(device_name="Test Device")
+        ble = IRBlasterBLE(config)
+        mock_device = MagicMock()
+        mock_device.name = "Test Device"
+        mock_device.address = "00:11:22:33:44:55"
+
+        async def hang_connect():
+            await asyncio.sleep(60)
+
+        mock_client = MagicMock()
+        mock_client.is_connected = False
+        mock_client.connect = hang_connect
+
+        with (
+            patch("blaster.ble_client.find_device", new_callable=AsyncMock) as mock_find,
+            patch("blaster.ble_client.BleakClient", return_value=mock_client),
+            patch("blaster.ble_client.CONNECT_HARD_TIMEOUT_SECONDS", 0.05),
+        ):
+            mock_find.return_value = mock_device
+            started = asyncio.get_running_loop().time()
+            success = await ble.connect()
+            elapsed = asyncio.get_running_loop().time() - started
+
+            assert success is False
+            assert ble._client is None
+            assert ble._device is None
+            assert elapsed < 2.0
 
 
 class TestIRBlasterBLE(unittest.IsolatedAsyncioTestCase):

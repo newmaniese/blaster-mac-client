@@ -1,10 +1,10 @@
 # Blaster Mac Client
 
-A macOS command-line app that monitors camera and microphone usage and sends IR commands to an ESP32-C3 IR Blaster over Bluetooth Low Energy (BLE). Use it to drive a dome light or "on air" indicator: **Red** when the camera or mic is on, **Green** after they've been off for two minutes. The **client** sends **On** when it connects and configures the ESP32 to run **Off** after a delay if BLE disconnects (e.g. after 15 minutes disconnected).
+A macOS app that monitors camera and microphone usage and sends IR commands to an [ESP32-C3 IR Blaster](https://github.com/newmaniese/ESP-BlasterHub) over Bluetooth Low Energy (BLE). Use it to drive a dome light or "on air" indicator: **Red** when the camera or mic is on, **Green** after they've been off for a configurable cooldown. The client sends **On** when it connects and configures the ESP32 to run **Off** after a delay if BLE disconnects (default: 15 minutes).
 
 **License:** MIT — see [LICENSE](LICENSE).
 
-**Privacy:** The app runs entirely on your Mac. It reads local macOS logs for camera/mic state and talks only to your IR Blaster over BLE. No telemetry or external servers.
+**Privacy:** The app runs entirely on your Mac. It reads local macOS logs for camera/mic state and talks only to your IR Blaster over BLE. No telemetry or external servers. The management UI binds to localhost only (`127.0.0.1`).
 
 ## How it works
 
@@ -27,9 +27,9 @@ sequenceDiagram
     BLE-->>App: Notify OK:Red
 
     Log-->>App: cam and mic both off
-    Note over App: Start 2-min cooldown
+    Note over App: Start cooldown
 
-    Note over App: 2 minutes elapse, still idle
+    Note over App: Cooldown elapses, still idle
     App->>BLE: Send "Green" by name
     BLE->>IR: sendNEC(Green)
     BLE-->>App: Notify OK:Green
@@ -40,103 +40,64 @@ sequenceDiagram
 ```
 
 - **Camera/mic detection:** Uses macOS `log stream` with the same control-center “sensor-indicators” events that drive the menu bar dots. No polling; events only when state changes.
-- **State machine:** IDLE → ACTIVE (cam or mic on) → COOLDOWN (both off) → IDLE after configurable cooldown. The client sends the **Active** command (e.g. Red) when entering ACTIVE and the **Idle** command (e.g. Green) when returning to IDLE.
-- **BLE:** Connects to the IR Blaster by name, reads Saved Codes to resolve command **names** to indices, sends commands by name. On connect it sends On and configures the Schedule (e.g. Off 900s after disconnect). Reconnects automatically after disconnect.
+- **State machine:** IDLE → ACTIVE (cam or mic on) → COOLDOWN (both off) → IDLE after the Idle cooldown. The client sends the **Active** command (e.g. Red) when entering ACTIVE and the **Idle** command (e.g. Green) when returning to IDLE.
+- **BLE:** Scans for the configured device name in the **advertised** BLE local name, reads Saved Codes to resolve command **names** to indices, and sends commands by name. On connect it runs **OnConnect** and configures the disconnect **Schedule**. It retries automatically if the device is missing or the link drops.
 
 ## Requirements
 
 - macOS (tested on Sonoma / Sequoia) with Bluetooth
-- Python 3.10+
-- ESP32-C3 IR Blaster firmware with BLE enabled, powered on, and **paired** with this Mac (default firmware uses Just Works — no passkey)
+- Python 3.10+ (bundled by the installer into a local venv)
+- [ESP32-C3 IR Blaster](https://github.com/newmaniese/ESP-BlasterHub) firmware with BLE enabled, powered on, and **paired** with this Mac (default firmware uses Just Works — no passkey)
 
-## Setup
+## Install from a release
 
-1. **Clone or copy** this project (e.g. next to your `irproject` repo):
+1. Download the latest `blaster-mac-client.zip` from [Releases](https://github.com/newmaniese/blaster-mac-client/releases).
+2. Unzip it (anywhere is fine, including Downloads).
+3. In Terminal:
 
    ```bash
-   cd ~/Projects
-   # create or clone blaster-mac-client
    cd blaster-mac-client
+   chmod +x install.sh && ./install.sh
    ```
 
-2. **Create a virtualenv and install dependencies:**
+The installer:
 
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   ```
+1. Copies the app to `~/Library/Application Support/blaster-mac-client` (never overwrites an existing `config.yaml` there).
+2. Creates a virtualenv and installs dependencies.
+3. Installs and loads a LaunchAgent so the client starts at login and restarts if it exits.
 
-3. **Bluetooth permission:** The first time you run the app, macOS may prompt for Bluetooth access. If the IR Blaster never appears, open **System Settings → Privacy & Security → Bluetooth** and ensure your terminal (e.g. Terminal.app or Cursor) is allowed.
+Open the management UI: **[http://127.0.0.1:8765](http://127.0.0.1:8765)**
 
-4. **Pair the IR Blaster once** (e.g. with nRF Connect or by running this app). With default firmware no passkey is required.
+Logs: `~/Library/Logs/blaster-mac-client/stdout.log` and `stderr.log`.
 
-## Usage
+After installing you can delete the unzipped folder. To remove the installed app: run `./uninstall.sh` from a copy of the project, or see [Uninstall](#uninstall).
 
-From the project root with the venv activated:
+Pair the IR Blaster once (this app or nRF Connect). With default firmware no passkey is required. If the light never responds, check **System Settings → Privacy & Security → Bluetooth** and allow `blaster-mac-client`.
 
-```bash
-python -m blaster
-```
+## Management UI
 
-Or: `make run` (via `run.sh`).
+While the app is running, open **[http://127.0.0.1:8765](http://127.0.0.1:8765)** (localhost only).
 
-A local status UI starts at **http://127.0.0.1:8765** (localhost only). Use it to see connection/light status, send commands, edit config, and reconnect.
+| Section | What you can do |
+|---------|-----------------|
+| **Status** | Connection state, configured device name, state machine (idle / active / cooldown), camera and mic on/off, last command / light color, and any error message. |
+| **Controls** | **Reconnect** to the BLE device. Buttons for each saved IR command on the connected blaster (loaded from the device). |
+| **Configuration** | Edit device name and event commands, then **Save & apply**. |
 
-Optional flags:
-
-```bash
-python -m blaster --config /path/to/myconfig.yaml
-python -m blaster --port 9000
-```
-
-- The app scans for the device named **IR Blaster**, connects, sends **On** (optionally after a short delay), and configures the ESP32 to run **Off** after a configurable delay once BLE disconnects.
-- When any app starts using the camera or microphone, the client sends the **Active** command (e.g. Red) by name.
-- When both camera and microphone have been idle for the configured cooldown, it sends the **Idle** command (e.g. Green) by name.
-- If the Mac disconnects (sleep, out of range), the ESP32 starts the countdown and runs the scheduled command (e.g. Off) after the configured delay unless the client reconnects first.
-- Saving config in the UI writes `config.yaml` and safely restarts the BLE session with the new settings.
-
-Stop with **Ctrl+C**; the client disconnects cleanly.
-
-### Run at login (LaunchAgent)
-
-Quick installer — from the project root:
-
-```bash
-chmod +x install.sh && ./install.sh
-```
-
-This:
-
-1. Copies the project to `~/Library/Application Support/blaster-mac-client` (excluding `.git`, `dist`, caches, and any existing installed `config.yaml`).
-2. Creates the virtualenv there and installs dependencies.
-3. Writes `~/Library/LaunchAgents/com.blaster-mac-client.plist` from `com.blaster-mac-client.plist` (substituting the install and log directories) and loads it.
-
-The client starts at login and restarts if it exits or crashes. Logs: `~/Library/Logs/blaster-mac-client/stdout.log` and `stderr.log`.
-
-The installed copy is what runs — re-run `./install.sh` after changing code in the source tree. Editing config is safe either way: `install.sh` never overwrites an existing `~/Library/Application Support/blaster-mac-client/config.yaml`.
-
-- **Uninstall (stop, disable, remove the installed copy):** `./uninstall.sh`
-- **Reload:** `launchctl unload ~/Library/LaunchAgents/com.blaster-mac-client.plist` then `launchctl load …` (saving config in the UI restarts the BLE session on its own, so no reload is needed for config changes)
-
-You can also run `./install-launchd.sh` (it calls `install.sh`).
-
-#### Why it installs to `~/Library/Application Support`
-
-A LaunchAgent inherits no privacy (TCC) grants, so launchd cannot read `~/Desktop`, `~/Documents`, `~/Downloads`, or iCloud Drive. An agent pointed at a project in one of those folders dies immediately with:
-
-```
-shell-init: error retrieving current directory: getcwd: cannot access parent directories: Operation not permitted
-bash: /Users/you/Downloads/blaster-mac-client/run.sh: Operation not permitted
-```
-
-`~/Library/Application Support` is not protected, so installing there means the agent runs with **no permission prompts and no Full Disk Access**. The agent also launches `.venv/bin/python -m blaster` directly rather than going through `run.sh`, so it needs no shell and never installs dependencies at login.
-
-The one permission that can still be required is **Bluetooth**: if the light never responds after installing, check **System Settings → Privacy & Security → Bluetooth** and allow `blaster-mac-client`.
+Saving config writes `config.yaml` next to the running install and safely restarts the BLE session with the new settings. You do **not** need to reload the LaunchAgent for config changes.
 
 ## Configuration
 
-Edit `config.yaml` next to the `blaster/` package — the project root when running from source, or `~/Library/Application Support/blaster-mac-client/config.yaml` once installed (the status UI always edits the one the running app loaded). All commands are specified by **name** (the client resolves names to indices using the device’s Saved Codes).
+Edit settings in the management UI, or edit `config.yaml` directly:
+
+| How you run | Config file the app uses |
+|-------------|---------------------------|
+| Installed via `install.sh` | `~/Library/Application Support/blaster-mac-client/config.yaml` |
+| From source (`python -m blaster` / `./run.sh`) | `config.yaml` next to the `blaster/` package in the project tree |
+
+The UI always edits whichever file the running process loaded. Re-running `./install.sh` never overwrites an existing installed `config.yaml`.
+
+All commands are specified by **name**. The client resolves names to indices using the device’s Saved Codes. Names must match a saved code on the IR Blaster (check the ESP32’s own web UI or `GET /saved` on the device).
 
 ```yaml
 ble:
@@ -148,26 +109,129 @@ events:
       Delay: 0
     - NamedCommand: "Green"
       Delay: 2
-  OnDisconnect:             # first item: disconnect schedule
+  OnDisconnect:             # first item only: disconnect schedule
     - NamedCommand: "Off"
       Delay: 900
   Active:
     - NamedCommand: "Red"
+      Delay: 0
   Idle:                     # first item's Delay = cooldown before Idle
     - NamedCommand: "Green"
       Delay: 120
 ```
 
-Every event is a **list** of `{ NamedCommand, Delay? }`. Commands run in order; each `Delay` is seconds to wait before that command (0 = immediately). Single `{ NamedCommand, Delay }` still works for one command.
+Every event is a **list** of `{ NamedCommand, Delay? }`. Commands run in order; each `Delay` is seconds to wait before that command (`0` = immediately). A single `{ NamedCommand, Delay }` object still works for one command.
 
-| Event | Description |
-|-------|-------------|
-| **OnConnect** | Commands to run when the client connects, in order. |
-| **OnDisconnect** | First item only: ESP32 runs `NamedCommand` `Delay` seconds after BLE disconnect; reconnect cancels the countdown. |
-| **Active** | Commands when camera or mic turns on (e.g. "Red"). |
-| **Idle** | First item's `Delay` = cooldown (seconds) before Idle; then all commands run in order. |
+| Field / event | Description |
+|---------------|-------------|
+| **`ble.device_name`** | Exact BLE advertised name to connect to (case-insensitive). Must match the firmware `BLE_DEVICE_NAME` (and what System Settings → Bluetooth shows). |
+| **OnConnect** | Commands when the client connects, in order. |
+| **OnDisconnect** | First item only: ESP32 runs `NamedCommand` `Delay` seconds after BLE disconnect; reconnect cancels the countdown. Default delay is 900s if unset/`0`. |
+| **Active** | Commands when camera or mic turns on (e.g. `"Red"`). |
+| **Idle** | First item's `Delay` = cooldown (seconds both cam and mic must stay off) before Idle commands run; then all Idle commands run in order. |
 
-Command names must match the **name** of a saved code on the IR Blaster (web UI or `GET /saved`). The ESP32 has no built-in "On" or "Off"; the client sends On and configures the disconnect Off via the Schedule characteristic.
+If you rename the blaster in firmware, set `device_name` to the new advertised name (UI or `config.yaml`) and save. Discovery matches the **live advertisement**, not macOS’s cached peripheral name.
+
+## Behavior summary
+
+- Scans for `ble.device_name`, connects, runs **OnConnect**, and configures the ESP32 disconnect schedule from **OnDisconnect**.
+- When any app uses the camera or microphone, sends **Active** (e.g. Red).
+- When both have been idle for the Idle cooldown, sends **Idle** (e.g. Green).
+- If the Mac disconnects (sleep, out of range), the ESP32 starts the countdown and runs the scheduled command unless the client reconnects first.
+- If connect fails at startup or after a config change, the client keeps retrying on its own.
+
+## Run from source
+
+For development, or if you prefer not to use a release zip:
+
+```bash
+git clone https://github.com/newmaniese/blaster-mac-client.git
+cd blaster-mac-client
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m blaster
+```
+
+Or: `make run` (via `run.sh`).
+
+Optional flags:
+
+```bash
+python -m blaster --config /path/to/myconfig.yaml
+python -m blaster --port 9000
+```
+
+Stop with **Ctrl+C**; the client disconnects cleanly.
+
+To install that tree as the login agent: `chmod +x install.sh && ./install.sh` (or `make install`). After changing code, re-run `./install.sh` so `~/Library/Application Support/blaster-mac-client` picks up the new files.
+
+### Why it installs to `~/Library/Application Support`
+
+A LaunchAgent inherits no privacy (TCC) grants, so launchd cannot read `~/Desktop`, `~/Documents`, `~/Downloads`, or iCloud Drive. An agent pointed at a project in one of those folders dies immediately with:
+
+```
+shell-init: error retrieving current directory: getcwd: cannot access parent directories: Operation not permitted
+bash: /Users/you/Downloads/blaster-mac-client/run.sh: Operation not permitted
+```
+
+`~/Library/Application Support` is not protected, so installing there means the agent runs with **no permission prompts and no Full Disk Access**. The agent launches `.venv/bin/python -m blaster` directly (not `run.sh`), so it needs no shell and never installs dependencies at login.
+
+### Uninstall
+
+```bash
+./uninstall.sh
+```
+
+Or manually:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.blaster-mac-client.plist
+rm -rf ~/Library/LaunchAgents/com.blaster-mac-client.plist
+rm -rf ~/Library/Application\ Support/blaster-mac-client
+```
+
+Logs under `~/Library/Logs/blaster-mac-client` are left in place.
+
+`./install-launchd.sh` is a thin wrapper that calls `install.sh`.
+
+## Troubleshooting
+
+- **“Could not find or connect to IR Blaster” / device not found**  
+  Ensure the blaster is powered, in range, and paired. Confirm `ble.device_name` matches the name in **System Settings → Bluetooth** (and the firmware `BLE_DEVICE_NAME`). Grant Bluetooth access under **Privacy & Security → Bluetooth** for the app that owns the process (for the LaunchAgent install, allow `blaster-mac-client`).
+
+- **Device renamed but the app still can’t find it**  
+  Update **Device name** in the management UI (or `config.yaml`) to the new advertised name and Save & apply. Current builds match the advertisement, so a stale macOS cache alone should not block discovery.
+
+- **macOS Bluetooth menu doesn’t list the blaster**  
+  Custom BLE GATT servers often do not appear as classic Bluetooth accessories. Use this app (or nRF Connect) to connect; after pairing once, reconnection is automatic.
+
+- **Camera/mic state not updating**  
+  The app uses `log stream` with `com.apple.controlcenter` / `sensor-indicators`. On older macOS the predicate or message format may differ; run `blaster/av_monitor.py` as a script to print initial state and live events.
+
+- **Command not found**  
+  Names in `config.yaml` (e.g. `"Red"`, `"Green"`, `"On"`, `"Off"`) must match a **saved code name** on the IR Blaster. Check the ESP32 web UI or `GET /saved` on the device.
+
+- **`Operation not permitted` in the LaunchAgent logs**  
+  The agent is still pointed at a privacy-protected folder. Run `./install.sh` again so it lives under `~/Library/Application Support/blaster-mac-client`.
+
+## Packaging for GitHub Releases
+
+Maintainers: from the project root,
+
+```bash
+make package
+```
+
+writes `dist/blaster-mac-client.zip` (excludes `.venv`, `.git`, caches, and logs). Attach that zip to a [GitHub Release](https://github.com/newmaniese/blaster-mac-client/releases):
+
+```bash
+gh release create v1.0.0 dist/blaster-mac-client.zip \
+  --title "v1.0.0" \
+  --notes "Install: unzip, then chmod +x install.sh && ./install.sh. See QUICKSTART.txt."
+```
+
+The zip includes **QUICKSTART.txt** for recipients.
 
 ## Running tests
 
@@ -178,65 +242,30 @@ source .venv/bin/activate
 pytest tests/ -v
 ```
 
-## Troubleshooting
-
-- **“Could not find or connect to IR Blaster”**  
-  Ensure the IR Blaster is powered, in range, and already paired with this Mac. Check **System Settings → Bluetooth**. If you use a different terminal (e.g. Cursor), grant it Bluetooth access under **Privacy & Security → Bluetooth**.
-
-- **“Device not found”**  
-  macOS often does not list custom BLE GATT servers in the Bluetooth menu. Use this app (or nRF Connect) to connect; after pairing once, reconnection is automatic.
-
-- **Camera/mic state not updating**  
-  The app uses `log stream` with `com.apple.controlcenter` / `sensor-indicators`. If you’re on an older macOS, the predicate or message format may differ; run `blaster/av_monitor.py` as a script to print initial state and live events and confirm events are received.
-
-- **Command not found**  
-  Command names in `config.yaml` (e.g. "Red", "Green", "On", "Off") must match the **name** of a saved code on the IR Blaster. Check the web UI or `GET /saved` for the exact names.
-
-- **`Operation not permitted` in the LaunchAgent logs**  
-  The agent is pointed at a privacy-protected folder (`~/Desktop`, `~/Documents`, `~/Downloads`, iCloud Drive). Run `./install.sh` again to reinstall to `~/Library/Application Support/blaster-mac-client`; see [Why it installs to `~/Library/Application Support`](#why-it-installs-to-libraryapplication-support).
-
-## Packaging for another Mac (e.g. send via Teams)
-
-From the project root:
-
-```bash
-make package
-```
-
-This writes `dist/blaster-mac-client.zip`, excluding `.venv`, `.git`, caches, and logs. Send that zip (e.g. via Teams). It includes **QUICKSTART.txt** with these steps for the recipient. On the other Mac:
-
-1. Unzip the file (anywhere, including Downloads).
-2. Open Terminal, then: `cd blaster-mac-client`
-3. Install to run at login: `chmod +x install.sh && ./install.sh`
-
-The installer copies the app out of the unzipped folder, so the recipient can delete it afterwards. To try it once without installing, run `chmod +x run.sh && ./run.sh` instead and stop with **Ctrl+C**.
+Or: `make test`.
 
 ## Project layout
 
 ```
 blaster-mac-client/
-  Makefile              # make venv / test / run / install / package / clean
+  Makefile              # make venv / test / run / install / uninstall / package / clean
   config.yaml           # Device name, events (NamedCommand, Delay)
   requirements.txt
-  run.sh                # One-step run from source (creates venv if needed, then starts app)
-  install.sh            # Installer: copy to ~/Library/Application Support + LaunchAgent
+  run.sh                # One-step run from source (creates venv if needed)
+  install.sh            # Copy to ~/Library/Application Support + LaunchAgent
   uninstall.sh          # Unload the agent and delete the installed copy
-  com.blaster-mac-client.plist  # LaunchAgent template (INSTALL_DIR / LOG_DIR substituted by install.sh)
-  QUICKSTART.txt        # Short instructions for someone running on another Mac
+  com.blaster-mac-client.plist  # LaunchAgent template (INSTALL_DIR / LOG_DIR)
+  QUICKSTART.txt        # Short instructions for release zip recipients
   blaster/
-    __init__.py
     __main__.py         # Entry point (python -m blaster)
-    app.py              # AppController: BLE lifecycle, status, safe config restart
+    app.py              # AppController: BLE lifecycle, status, reconnect, config restart
     web.py              # Localhost HTTP UI + JSON API (default :8765)
     static/             # Status / controls / config UI
     config.py           # Load/save config with defaults
-    ble_client.py       # BLE scan, connect, send_command, reconnect
+    ble_client.py       # BLE scan (advertised name), connect, send_command
     av_monitor.py       # Camera/mic via log stream
-    state_machine.py    # IDLE / ACTIVE / COOLDOWN, 2-min timer
+    state_machine.py    # IDLE / ACTIVE / COOLDOWN
   tests/
-    test_config.py
-    test_av_monitor.py
-    test_state_machine.py
 ```
 
-This repo is intended to live separately from the IR Blaster firmware repo; point the “IR Blaster” link above to your actual firmware project.
+This repo is the Mac client. Firmware for the ESP32 lives in [ESP-BlasterHub](https://github.com/newmaniese/ESP-BlasterHub).

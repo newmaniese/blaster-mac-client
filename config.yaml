@@ -8,10 +8,10 @@ events:
     Delay: 2
   OnDisconnect:
   - NamedCommand: 'Off'
-    Delay: 45
+    Delay: 900
   Active:
   - NamedCommand: Red
     Delay: 0
   Idle:
   - NamedCommand: Green
-    Delay: 75
+    Delay: 120

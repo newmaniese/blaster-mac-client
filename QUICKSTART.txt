@@ -1,31 +1,41 @@
 Blaster Mac Client — run on this Mac
 ====================================
 
-1. Unzip this folder anywhere (Downloads is fine).
+1. Download blaster-mac-client.zip from:
+   https://github.com/newmaniese/blaster-mac-client/releases
 
-2. Open Terminal (Applications → Utilities → Terminal).
+2. Unzip the folder anywhere (Downloads is fine).
 
-3. Go into the folder:
+3. Open Terminal (Applications → Utilities → Terminal).
+
+4. Go into the folder:
    cd blaster-mac-client
 
-4. Install it to run at login:
+5. Install it to run at login:
    chmod +x install.sh && ./install.sh
 
-   This copies the app to ~/Library/Application Support/blaster-mac-client, installs the
-   dependencies, and starts it. It will start automatically when you log in and restart if
-   it crashes. No permission prompts and no Full Disk Access needed.
+   This copies the app to:
+     ~/Library/Application Support/blaster-mac-client
+   installs dependencies, and starts it. It starts automatically when you
+   log in and restarts if it crashes. No Full Disk Access needed.
 
-   Status UI: http://127.0.0.1:8765
+   Management UI: http://127.0.0.1:8765
+     • Status (connection, cam/mic, last command)
+     • Reconnect and send saved IR commands
+     • Edit device name and OnConnect / OnDisconnect / Active / Idle, then Save & apply
+
    Logs: ~/Library/Logs/blaster-mac-client/stdout.log and stderr.log
 
    After installing, you can delete this unzipped folder.
 
 To remove: ./uninstall.sh   (or, if you deleted this folder:
    launchctl unload ~/Library/LaunchAgents/com.blaster-mac-client.plist
-   rm -rf ~/Library/LaunchAgents/com.blaster-mac-client.plist "~/Library/Application Support/blaster-mac-client")
+   rm -rf ~/Library/LaunchAgents/com.blaster-mac-client.plist
+   rm -rf "$HOME/Library/Application Support/blaster-mac-client")
 
 Just want to try it once, without installing?
    chmod +x run.sh && ./run.sh      (Ctrl+C to stop)
 
-Requirements: macOS with Bluetooth; IR Blaster powered, in range, and paired with this Mac.
-Optional: edit config.yaml (or use the status UI) to change device name or command names.
+Requirements: macOS with Bluetooth; IR Blaster powered, in range, and paired
+with this Mac. Device name in config must match the BLE advertised name
+(System Settings → Bluetooth / firmware BLE_DEVICE_NAME).

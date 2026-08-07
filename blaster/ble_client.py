@@ -25,6 +25,13 @@ CHAR_SCHEDULE_UUID = "e97a0005-c116-4a63-a60f-0e9b4d3648f3"
 
 logger = logging.getLogger(__name__)
 
+# Bleak's own scan timeout; macOS CoreBluetooth can ignore it when the stack is wedged.
+SCAN_TIMEOUT_SECONDS = 10.0
+# Hard ceiling around discover so a hung scanner cannot block reconnect for minutes.
+SCAN_HARD_TIMEOUT_SECONDS = 15.0
+# Hard ceiling around BleakClient.connect for the same reason.
+CONNECT_HARD_TIMEOUT_SECONDS = 20.0
+
 
 async def find_device(config: BLEConfig) -> BLEDevice | None:
     """
@@ -33,9 +40,23 @@ async def find_device(config: BLEConfig) -> BLEDevice | None:
     Matches the local name from the advertisement rather than BLEDevice.name,
     which on macOS is a CoreBluetooth cache that keeps reporting the previous
     name after the device is renamed.
+
+    A hard asyncio timeout wraps BleakScanner.discover so a wedged Bluetooth
+    stack cannot hang the reconnect loop for tens of minutes.
     """
     logger.info("Scanning for BLE device %s...", config.device_name)
-    discovered = await BleakScanner.discover(timeout=10.0, return_adv=True)
+    try:
+        discovered = await asyncio.wait_for(
+            BleakScanner.discover(timeout=SCAN_TIMEOUT_SECONDS, return_adv=True),
+            timeout=SCAN_HARD_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        logger.warning(
+            "BLE scan timed out after %.0fs looking for %s",
+            SCAN_HARD_TIMEOUT_SECONDS,
+            sanitize_log_message(config.device_name),
+        )
+        return None
     for device, adv in discovered.values():
         local_name = adv.local_name
         if local_name and config.device_name.lower() == local_name.lower():
@@ -76,12 +97,24 @@ class IRBlasterBLE:
         self._device = device
         self._client = BleakClient(device, disconnected_callback=self._handle_disconnect)
         try:
-            await self._client.connect()
+            await asyncio.wait_for(
+                self._client.connect(),
+                timeout=CONNECT_HARD_TIMEOUT_SECONDS,
+            )
             self._name_to_index = None  # refresh saved codes on next use
             logger.info(
                 "Connected to %s", sanitize_log_message(device.name or device.address)
             )
             return True
+        except TimeoutError:
+            logger.error(
+                "BLE connect timed out after %.0fs to %s",
+                CONNECT_HARD_TIMEOUT_SECONDS,
+                sanitize_log_message(device.name or device.address),
+            )
+            self._client = None
+            self._device = None
+            return False
         except Exception as e:
             logger.exception("Connect failed: %s", sanitize_log_message(e))
             self._client = None
