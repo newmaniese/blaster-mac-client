@@ -3,7 +3,14 @@ import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from blaster.av_monitor import stream_av_events, LOG_PREDICATE, PREFIX
+from blaster.av_monitor import (
+    LEGACY_PREFIX,
+    LOG_PREDICATE,
+    SORTED_PREFIX,
+    stream_av_events,
+)
+
+PREFIX = LEGACY_PREFIX
 
 class TestStreamAVEvents(unittest.IsolatedAsyncioTestCase):
     async def test_state_change_yielding(self):
@@ -79,6 +86,37 @@ class TestStreamAVEvents(unittest.IsolatedAsyncioTestCase):
 
             # Should only yield the valid mic state
             self.assertEqual(results, [(False, True)])
+
+    async def test_sorted_format_yields_state(self):
+        """The macOS 26 message shape must drive the same state changes."""
+        mock_proc = MagicMock()
+        mock_proc.returncode = None
+        mock_proc.stdout = AsyncMock()
+        mock_proc.wait = AsyncMock()
+        mock_proc.terminate = MagicMock()
+        mock_proc.kill = MagicMock()
+
+        log_lines = [
+            json.dumps(
+                {"eventMessage": SORTED_PREFIX + "[cam] Zoom (us.zoom.xos)]"}
+            ).encode("utf-8") + b"\n",
+            json.dumps(
+                {
+                    "eventMessage": SORTED_PREFIX
+                    + "[cam] Zoom (us.zoom.xos), [mic] Zoom (us.zoom.xos)]"
+                }
+            ).encode("utf-8") + b"\n",
+            json.dumps({"eventMessage": SORTED_PREFIX + "]"}).encode("utf-8") + b"\n",
+            b"",
+        ]
+        mock_proc.stdout.readline.side_effect = log_lines
+
+        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = mock_proc
+
+            results = [state async for state in stream_av_events()]
+
+        self.assertEqual(results, [(True, False), (True, True), (False, False)])
 
     async def test_termination_fallback_process_lookup_error(self):
         """Verify that if proc.terminate() throws ProcessLookupError, proc.kill() is NOT invoked."""

@@ -127,6 +127,114 @@ async def test_onconnect_fires_after_reconnect(minimal_config) -> None:
 
 
 @pytest.mark.asyncio
+async def test_reconnect_before_disconnect_timeout_suppresses_commands(
+    minimal_config,
+) -> None:
+    """The ESP32 countdown snapshot, not Mac AV state, controls quiet reconnect."""
+    _cfg, path = minimal_config
+    spec_calls: list[tuple] = []
+    connected = [True]
+
+    async def record_execute_specs(ble, specs, context="", on_sent=None, **kwargs):
+        spec_calls.append((specs, context))
+
+    async def connect_and_mark():
+        connected[0] = True
+        return True
+
+    mock_ble = MagicMock()
+    mock_ble.connect = AsyncMock(side_effect=connect_and_mark)
+    mock_ble.wait_until_ready = AsyncMock()
+    mock_ble.get_disconnect_timeout_state = AsyncMock(
+        side_effect=[
+            {"state": "none", "remaining_seconds": 0, "command": ""},
+            {"state": "interrupted", "remaining_seconds": 842, "command": "Off"},
+        ]
+    )
+    mock_ble.schedule_disconnect_command = AsyncMock()
+    mock_ble.send_heartbeat = AsyncMock()
+    mock_ble.disconnect = AsyncMock()
+    mock_ble.set_disconnect_callback = MagicMock()
+    type(mock_ble).is_connected = property(lambda self: connected[0])
+
+    with (
+        patch("blaster.app.IRBlasterBLE", return_value=mock_ble),
+        patch("blaster.app.execute_specs", side_effect=record_execute_specs),
+        patch("blaster.app.get_initial_state", return_value=(True, True)),
+        patch("blaster.app.stream_av_events", return_value=_never_yield()),
+    ):
+        ctrl = AppController(path)
+        await ctrl.start()
+        try:
+            spec_calls.clear()
+            schedule_calls = mock_ble.schedule_disconnect_command.await_count
+            connected[0] = False
+
+            result = await ctrl.request_reconnect()
+
+            assert result["connected"] is True
+            assert result["disconnect_timeout"] == {
+                "state": "interrupted",
+                "remaining_seconds": 842,
+                "command": "Off",
+            }
+            assert spec_calls == []
+            assert mock_ble.schedule_disconnect_command.await_count > schedule_calls
+        finally:
+            await ctrl.stop()
+
+
+@pytest.mark.asyncio
+async def test_reconnect_after_timeout_runs_onconnect_then_active(
+    minimal_config,
+) -> None:
+    """Active runs only after every OnConnect command has completed."""
+    _cfg, path = minimal_config
+    commands: list[str] = []
+    connected = [True]
+
+    async def record_execute_specs(ble, specs, context="", on_sent=None, **kwargs):
+        commands.extend(spec.NamedCommand for spec in specs)
+
+    async def connect_and_mark():
+        connected[0] = True
+        return True
+
+    mock_ble = MagicMock()
+    mock_ble.connect = AsyncMock(side_effect=connect_and_mark)
+    mock_ble.wait_until_ready = AsyncMock()
+    mock_ble.get_disconnect_timeout_state = AsyncMock(
+        side_effect=[
+            {"state": "none", "remaining_seconds": 0, "command": ""},
+            {"state": "expired", "remaining_seconds": 0, "command": "Off"},
+        ]
+    )
+    mock_ble.schedule_disconnect_command = AsyncMock()
+    mock_ble.send_heartbeat = AsyncMock()
+    mock_ble.disconnect = AsyncMock()
+    mock_ble.set_disconnect_callback = MagicMock()
+    type(mock_ble).is_connected = property(lambda self: connected[0])
+
+    with (
+        patch("blaster.app.IRBlasterBLE", return_value=mock_ble),
+        patch("blaster.app.execute_specs", side_effect=record_execute_specs),
+        patch("blaster.app.get_initial_state", return_value=(True, True)),
+        patch("blaster.app.stream_av_events", return_value=_never_yield()),
+    ):
+        ctrl = AppController(path)
+        await ctrl.start()
+        try:
+            commands.clear()
+            connected[0] = False
+
+            await ctrl.request_reconnect()
+
+            assert commands == ["On", "Red"]
+        finally:
+            await ctrl.stop()
+
+
+@pytest.mark.asyncio
 async def test_schedule_configured_before_onconnect_commands(minimal_config) -> None:
     """The disconnect schedule is configured before OnConnect commands, on connect and reconnect."""
     _cfg, path = minimal_config

@@ -10,14 +10,30 @@ import re
 import subprocess
 from typing import AsyncIterator
 
+# Control Center reports the active sensors in two different shapes depending on
+# the macOS release, and a single machine can switch between them when Control
+# Center restarts, so both have to be understood.
+#   legacy: Active activity attributions changed to ["cam:us.zoom.xos"]
+#   sorted: Sorted active attributions from SystemStatus update: [[cam] Zoom (us.zoom.xos)]
+LEGACY_PREFIX = "Active activity attributions changed to ["
+SORTED_PREFIX = "Sorted active attributions from SystemStatus update: ["
+
 # Predicate for sensor-indicators (cam/mic/loc). Must match macOS log format.
 LOG_PREDICATE = (
     "subsystem == 'com.apple.controlcenter' AND "
     "category == 'sensor-indicators' AND "
-    "formatString BEGINSWITH 'Active '"
+    "(formatString BEGINSWITH 'Active activity attributions changed to' OR "
+    "formatString BEGINSWITH 'Sorted active attributions')"
 )
-PREFIX = "Active activity attributions changed to ["
 SPLIT_PATTERN = re.compile(r",\s*")
+# The sorted form tags each entry, e.g. "[cam] Zoom (us.zoom.xos)". An [aud] tag
+# is audio playback rather than the microphone, so only cam/mic count here.
+SENSOR_TAG_PATTERN = re.compile(r"\[(cam|mic)\]")
+
+
+def is_sensor_message(event_message: str) -> bool:
+    """True when the message is one of the sensor-indicator attribution forms."""
+    return event_message.startswith((LEGACY_PREFIX, SORTED_PREFIX))
 
 
 def parse_event_message(event_message: str) -> tuple[bool, bool]:
@@ -25,9 +41,12 @@ def parse_event_message(event_message: str) -> tuple[bool, bool]:
     Parse a single eventMessage string from log stream.
     Returns (camera_active, mic_active).
     """
-    if not event_message.startswith(PREFIX):
+    if event_message.startswith(SORTED_PREFIX):
+        tags = set(SENSOR_TAG_PATTERN.findall(event_message[len(SORTED_PREFIX) :]))
+        return "cam" in tags, "mic" in tags
+    if not event_message.startswith(LEGACY_PREFIX):
         return False, False
-    suffix = event_message[len(PREFIX) :].rstrip("]").strip()
+    suffix = event_message[len(LEGACY_PREFIX) :].rstrip("]").strip()
     if not suffix:
         return False, False
     camera = False
@@ -70,7 +89,7 @@ def get_initial_state() -> tuple[bool, bool]:
         try:
             obj = json.loads(line)
             msg = obj.get("eventMessage") or obj.get("message") or ""
-            if msg.startswith(PREFIX):
+            if is_sensor_message(msg):
                 return parse_event_message(msg)
         except (json.JSONDecodeError, KeyError):
             continue
@@ -106,7 +125,7 @@ async def stream_av_events() -> AsyncIterator[tuple[bool, bool]]:
             try:
                 obj = json.loads(line)
                 msg = obj.get("eventMessage") or obj.get("message") or ""
-                if not msg.startswith(PREFIX):
+                if not is_sensor_message(msg):
                     continue
                 state = parse_event_message(msg)
                 if state != last:

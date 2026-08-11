@@ -9,6 +9,7 @@
   const smState = $("sm-state");
   const camEl = $("cam");
   const micEl = $("mic");
+  const disconnectTimeoutEl = $("disconnect-timeout");
   const errorEl = $("error");
   const commandsEl = $("commands");
   const btnReconnect = $("btn-reconnect");
@@ -40,6 +41,26 @@
     return v ? "on" : "off";
   }
 
+  function formatDuration(totalSeconds) {
+    const seconds = Math.max(0, Number(totalSeconds) || 0);
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes}:${String(seconds % 60).padStart(2, "0")}`;
+  }
+
+  function formatDisconnectTimeout(timeout) {
+    if (!timeout || timeout.state === "unknown") {
+      return "unavailable (firmware update needed)";
+    }
+    if (timeout.state === "interrupted") {
+      const command = timeout.command || "command";
+      return `${command} canceled with ${formatDuration(timeout.remaining_seconds)} remaining`;
+    }
+    if (timeout.state === "expired") {
+      return `${timeout.command || "scheduled command"} timeout elapsed`;
+    }
+    return "no countdown";
+  }
+
   function renderStatus(s) {
     let state = "disconnected";
     let label = "Disconnected";
@@ -62,6 +83,7 @@
     smState.textContent = s.state || "—";
     camEl.textContent = onOff(!!s.cam);
     micEl.textContent = onOff(!!s.mic);
+    disconnectTimeoutEl.textContent = formatDisconnectTimeout(s.disconnect_timeout);
 
     if (s.error) {
       errorEl.hidden = false;

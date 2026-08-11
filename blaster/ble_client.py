@@ -8,7 +8,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any, Callable, Awaitable
+from typing import Any, Awaitable, Callable, Literal, TypedDict
 
 from bleak import BleakClient, BleakScanner
 from bleak.backends.device import BLEDevice
@@ -31,6 +31,12 @@ SCAN_TIMEOUT_SECONDS = 10.0
 SCAN_HARD_TIMEOUT_SECONDS = 15.0
 # Hard ceiling around BleakClient.connect for the same reason.
 CONNECT_HARD_TIMEOUT_SECONDS = 20.0
+
+
+class DisconnectTimeoutState(TypedDict):
+    state: Literal["none", "interrupted", "expired"]
+    remaining_seconds: int
+    command: str
 
 
 async def find_device(config: BLEConfig) -> BLEDevice | None:
@@ -222,6 +228,40 @@ class IRBlasterBLE:
             raise ValueError("delay_seconds must be non-negative")
         payload = json.dumps({"delay_seconds": delay_seconds, "command": command_name})
         await self._client.write_gatt_char(CHAR_SCHEDULE_UUID, payload.encode("utf-8"))
+
+    async def get_disconnect_timeout_state(self) -> DisconnectTimeoutState:
+        """
+        Read the countdown snapshot the ESP32 parked in Status when this link connected.
+
+        "interrupted" means this reconnect canceled a running disconnect timer;
+        "expired" means its deadline elapsed; "none" means no timer preceded the
+        connection.
+
+        Must be called before the first command of the connection: Status doubles
+        as the command-result channel, so a send overwrites the snapshot with a
+        string like "OK:Green", which fails to parse here.
+        """
+        self._ensure_connected()
+        raw = await self._client.read_gatt_char(CHAR_STATUS_UUID)
+        if not raw:
+            raise ValueError("Status read returned empty")
+        data = json.loads(raw.decode("utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("Status snapshot is not an object")
+        state = data.get("state")
+        remaining = data.get("remaining_seconds")
+        command = data.get("command")
+        if state not in ("none", "interrupted", "expired"):
+            raise ValueError(f"Invalid snapshot state: {state!r}")
+        if type(remaining) is not int or remaining < 0:
+            raise ValueError(f"Invalid snapshot remaining_seconds: {remaining!r}")
+        if not isinstance(command, str):
+            raise ValueError(f"Invalid snapshot command: {command!r}")
+        return {
+            "state": state,
+            "remaining_seconds": remaining,
+            "command": command,
+        }
 
     async def send_heartbeat(self) -> None:
         """Write a Schedule keepalive so the ESP32 GATT-idle watchdog does not drop the link."""

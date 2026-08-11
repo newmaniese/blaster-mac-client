@@ -26,6 +26,7 @@ from blaster.config import BLEConfig
 from blaster.ble_client import (
     CHAR_SCHEDULE_UUID,
     CHAR_SEND_UUID,
+    CHAR_STATUS_UUID,
     IRBlasterBLE,
     SCAN_TIMEOUT_SECONDS,
     find_device,
@@ -421,6 +422,56 @@ class TestIRBlasterBLE(unittest.IsolatedAsyncioTestCase):
 
         expected_payload = json.dumps({"delay_seconds": 900, "command": "Off"}).encode("utf-8")
         mock_client.write_gatt_char.assert_called_once_with(CHAR_SCHEDULE_UUID, expected_payload)
+
+    async def test_get_disconnect_timeout_state_interrupted(self) -> None:
+        config = BLEConfig(device_name="IR Blaster")
+        ble = IRBlasterBLE(config)
+        mock_client = MagicMock()
+        mock_client.is_connected = True
+        mock_client.read_gatt_char = AsyncMock(
+            return_value=json.dumps(
+                {
+                    "state": "interrupted",
+                    "remaining_seconds": 742,
+                    "command": "Off",
+                }
+            ).encode()
+        )
+        ble._client = mock_client
+
+        result = await ble.get_disconnect_timeout_state()
+
+        assert result == {
+            "state": "interrupted",
+            "remaining_seconds": 742,
+            "command": "Off",
+        }
+        mock_client.read_gatt_char.assert_awaited_once_with(CHAR_STATUS_UUID)
+
+    async def test_get_disconnect_timeout_state_rejects_command_result(self) -> None:
+        """A send overwrites the snapshot, so a status string must not parse as one."""
+        config = BLEConfig(device_name="IR Blaster")
+        ble = IRBlasterBLE(config)
+        mock_client = MagicMock()
+        mock_client.is_connected = True
+        mock_client.read_gatt_char = AsyncMock(return_value=b"OK:Green")
+        ble._client = mock_client
+
+        with self.assertRaises(ValueError):
+            await ble.get_disconnect_timeout_state()
+
+    async def test_get_disconnect_timeout_state_rejects_invalid_payload(self) -> None:
+        config = BLEConfig(device_name="IR Blaster")
+        ble = IRBlasterBLE(config)
+        mock_client = MagicMock()
+        mock_client.is_connected = True
+        mock_client.read_gatt_char = AsyncMock(
+            return_value=b'{"state":"interrupted","remaining_seconds":-1,"command":"Off"}'
+        )
+        ble._client = mock_client
+
+        with self.assertRaisesRegex(ValueError, "remaining_seconds"):
+            await ble.get_disconnect_timeout_state()
 
     async def test_send_heartbeat(self) -> None:
         config = BLEConfig(device_name="IR Blaster")

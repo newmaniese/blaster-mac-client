@@ -5,7 +5,14 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from blaster.av_monitor import parse_event_message, PREFIX, get_initial_state
+from blaster.av_monitor import (
+    LEGACY_PREFIX,
+    SORTED_PREFIX,
+    parse_event_message,
+    get_initial_state,
+)
+
+PREFIX = LEGACY_PREFIX
 
 
 def test_parse_empty_list() -> None:
@@ -36,6 +43,43 @@ def test_parse_multiple_cam_mic() -> None:
 def test_parse_loc_only() -> None:
     msg = PREFIX + "loc:System Services]"
     assert parse_event_message(msg) == (False, False)
+
+
+def test_parse_sorted_empty_list() -> None:
+    assert parse_event_message(SORTED_PREFIX + "]") == (False, False)
+
+
+def test_parse_sorted_cam_and_mic() -> None:
+    msg = SORTED_PREFIX + "[cam] Zoom (us.zoom.xos), [mic] Zoom (us.zoom.xos)]"
+    assert parse_event_message(msg) == (True, True)
+
+
+def test_parse_sorted_cam_only() -> None:
+    msg = SORTED_PREFIX + "[cam] Raycast Beta (com.raycast-x.macos)]"
+    assert parse_event_message(msg) == (True, False)
+
+
+def test_parse_sorted_ignores_audio_playback() -> None:
+    """An [aud] tag is playback, not the microphone."""
+    msg = SORTED_PREFIX + "[aud] Zoom (us.zoom.xos)]"
+    assert parse_event_message(msg) == (False, False)
+
+
+def test_parse_sorted_audio_with_mic() -> None:
+    msg = SORTED_PREFIX + (
+        "[aud] Zoom (us.zoom.xos), [mic] Zoom (us.zoom.xos), "
+        "[cam] Microsoft Teams (com.microsoft.teams2)]"
+    )
+    assert parse_event_message(msg) == (True, True)
+
+
+def test_parse_sorted_real_capture() -> None:
+    """Verbatim message captured from macOS while Zoom was in a meeting."""
+    raw = (
+        "Sorted active attributions from SystemStatus update: "
+        "[[cam] Zoom (us.zoom.xos), [mic] Zoom (us.zoom.xos)]"
+    )
+    assert parse_event_message(raw) == (True, True)
 
 
 def test_parse_no_prefix_returns_false() -> None:

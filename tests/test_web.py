@@ -83,6 +83,7 @@ async def test_get_status(client) -> None:
     assert data["connected"] is True
     assert data["cam"] is True
     assert data["mic"] is False
+    assert data["disconnect_timeout"]["state"] == "unknown"
     assert data["device_name"] == "API Blaster"
     assert isinstance(data["events"], list)
     assert data["events"]
@@ -161,3 +162,4 @@ async def test_index_page(client) -> None:
     assert "Blaster" in text
     assert "Activity" in text
     assert 'id="activity-log"' in text
+    assert 'id="disconnect-timeout"' in text

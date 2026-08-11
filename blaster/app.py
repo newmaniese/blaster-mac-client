@@ -39,6 +39,11 @@ class AppController:
         self._reconnecting = False
         self._running = False
         self._error: str | None = None
+        self._disconnect_timeout: dict[str, Any] = {
+            "state": "unknown",
+            "remaining_seconds": 0,
+            "command": "",
+        }
         self.last_command: str | None = None
         self.last_status: str | None = None
         self.cam = False
@@ -103,28 +108,6 @@ class AppController:
             still_wanted=lambda: self.sm.desired_command == key,
         )
 
-    async def _assert_current_state(self, context: str) -> None:
-        """
-        Force the lights to match the current AV state after a (re)connect.
-
-        OnConnect replays a fixed sequence that can leave the wrong colour
-        showing, and update() only fires on transitions — so a drop mid-meeting
-        would otherwise stay on the connect colour until the next idle→active
-        edge, which never comes while that meeting is still running.
-        """
-        if not self.ble.is_connected:
-            return
-        specs = getattr(self.config.events, self.sm.desired_command)
-        if not specs or specs[0].NamedCommand == self.last_command:
-            return
-        await execute_specs(
-            self.ble,
-            specs[:1],
-            context,
-            on_sent=self._command_sent_cb(context),
-            skip_first_delay=True,
-        )
-
     def status(self) -> dict[str, Any]:
         return {
             "connected": self.ble.is_connected,
@@ -135,6 +118,7 @@ class AppController:
             "last_command": self.last_command,
             "last_status": self.last_status,
             "device_name": self.config.ble.device_name,
+            "disconnect_timeout": self._disconnect_timeout,
             "error": self._error,
             "events": list(self._events),
         }
@@ -166,12 +150,12 @@ class AppController:
             self._ensure_reconnect_task()
         else:
             self._error = None
-            await self._run_after_connect()
+            quiet_reconnect = await self._run_after_connect()
             logger.info("Connected. Monitoring camera/mic...")
             self._add_event("Connected. Monitoring camera/mic…", "conn")
-            # Advance the machine, then colour from state rather than the edge.
             self.sm.update(self._av_active)
-            await self._assert_current_state("initial")
+            if not quiet_reconnect and self._av_active:
+                await self._dispatch("Active", "after connect")
 
         self._av_task = asyncio.create_task(self._av_loop())
         self._tick_task = asyncio.create_task(self._tick_loop())
@@ -275,35 +259,66 @@ class AppController:
                 self._ensure_reconnect_task()
                 return False
             self._error = None
-            await self._run_after_connect()
+            quiet_reconnect = await self._run_after_connect()
             if self.ble.is_connected:
                 self._add_event("Connected to IR Blaster", "conn")
             self.sm.update(self._av_active)
-            await self._assert_current_state("after connect")
+            if not quiet_reconnect and self._av_active:
+                await self._dispatch("Active", "after connect")
             # Report the link state we actually ended with: the device can drop
             # us again while we are still arming it.
             return self.ble.is_connected
         finally:
             self._reconnecting = False
 
-    async def _run_after_connect(self) -> None:
+    async def _run_after_connect(self) -> bool:
+        """Arm the link and return True when reconnect commands were suppressed."""
         try:
             await self.ble.wait_until_ready()
         except TimeoutError as e:
             logger.warning("%s", sanitize_log_message(e))
             self._add_event(f"Ready wait timed out: {e}", "error")
-            return
+            return False
         if not self.ble.is_connected:
-            return
-        # Configure disconnect schedule before OnConnect commands.
+            return False
+
+        try:
+            timeout_state = await self.ble.get_disconnect_timeout_state()
+            self._disconnect_timeout = dict(timeout_state)
+        except (BleakError, asyncio.TimeoutError, RuntimeError, TypeError, ValueError) as e:
+            # Firmware without the snapshot leaves a plain status string in
+            # Status. Preserve the established behavior when there is no
+            # authoritative source of truth to consult.
+            logger.warning(
+                "Disconnect timeout state unavailable: %s", sanitize_log_message(e)
+            )
+            self._disconnect_timeout = {
+                "state": "unknown",
+                "remaining_seconds": 0,
+                "command": "",
+            }
+
+        quiet_reconnect = self._disconnect_timeout["state"] == "interrupted"
         await self._restart_schedule()
-        await execute_specs(
-            self.ble,
-            self.config.events.OnConnect,
-            "on connect",
-            on_sent=self._command_sent_cb("on connect"),
-        )
+        if quiet_reconnect:
+            remaining = self._disconnect_timeout["remaining_seconds"]
+            command = self._disconnect_timeout["command"] or "scheduled command"
+            self._add_event(
+                f"Reconnect canceled {command} timeout with {remaining}s remaining; "
+                "light commands suppressed",
+                "conn",
+            )
+        else:
+            # Await the entire sequence, including all delays. The caller only
+            # evaluates and sends Active after OnConnect has fully completed.
+            await execute_specs(
+                self.ble,
+                self.config.events.OnConnect,
+                "on connect",
+                on_sent=self._command_sent_cb("on connect"),
+            )
         await self._start_heartbeat()
+        return quiet_reconnect
 
     async def _restart_schedule(self) -> None:
         """Configure the device's disconnect-delayed command (countdown starts on disconnect)."""

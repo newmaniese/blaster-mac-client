@@ -39,9 +39,9 @@ sequenceDiagram
     BLE->>IR: Run scheduled "Off"
 ```
 
-- **Camera/mic detection:** Uses macOS `log stream` with the same control-center “sensor-indicators” events that drive the menu bar dots. No polling; events only when state changes.
+- **Camera/mic detection:** Uses macOS `log stream` with the same control-center “sensor-indicators” events that drive the menu bar dots. No polling; events only when state changes. Control Center emits two different message shapes across macOS releases (`Active activity attributions changed to …` and `Sorted active attributions from SystemStatus update: …`) and both are recognized.
 - **State machine:** IDLE → ACTIVE (cam or mic on) → COOLDOWN (both off) → IDLE after the Idle cooldown. The client sends the **Active** command (e.g. Red) when entering ACTIVE and the **Idle** command (e.g. Green) when returning to IDLE. A command with a `Delay` is dropped if cam/mic state changes while it waits, so a late send cannot leave the wrong color showing.
-- **BLE:** Scans for the configured device name in the **advertised** BLE local name, reads Saved Codes to resolve command **names** to indices, and sends commands by name. On connect it runs **OnConnect** and configures the disconnect **Schedule**, then re-sends the Active or Idle command if **OnConnect** left a color that disagrees with the current camera/mic state. While connected it sends Schedule heartbeats every 60s so the ESP32’s GATT-idle watchdog does not drop a healthy idle link. It retries automatically if the device is missing or the link drops.
+- **BLE:** Scans for the configured device name in the **advertised** BLE local name, reads Saved Codes to resolve command **names** to indices, and sends commands by name. On reconnect it first reads the ESP32’s disconnect-timeout snapshot, which the device parks in the Status characteristic at connect time (read before the first send, since a send overwrites Status with the command result). If the reconnect canceled a running timeout, it quietly re-arms the schedule without sending light commands. Otherwise it runs all **OnConnect** commands and delays, then runs **Active** if the camera or mic is on. While connected it sends Schedule heartbeats every 60s so the ESP32’s GATT-idle watchdog does not drop a healthy idle link. It retries automatically if the device is missing or the link drops.
 
 ## Requirements
 
@@ -80,7 +80,7 @@ While the app is running, open **[http://127.0.0.1:8765](http://127.0.0.1:8765)*
 
 | Section | What you can do |
 |---------|-----------------|
-| **Status** | Connection state, configured device name, state machine (idle / active / cooldown), camera and mic on/off, last command / light color, and any error message. |
+| **Status** | Connection state, configured device name, state machine (idle / active / cooldown), camera and mic on/off, the ESP32 timeout snapshot from the last connection, last command / light color, and any error message. |
 | **Controls** | **Reconnect** to the BLE device. Buttons for each saved IR command on the connected blaster (loaded from the device). |
 | **Configuration** | Edit device name and event commands, then **Save & apply**. |
 
