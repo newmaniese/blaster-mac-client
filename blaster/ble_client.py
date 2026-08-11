@@ -50,7 +50,7 @@ async def find_device(config: BLEConfig) -> BLEDevice | None:
             BleakScanner.discover(timeout=SCAN_TIMEOUT_SECONDS, return_adv=True),
             timeout=SCAN_HARD_TIMEOUT_SECONDS,
         )
-    except TimeoutError:
+    except asyncio.TimeoutError:
         logger.warning(
             "BLE scan timed out after %.0fs looking for %s",
             SCAN_HARD_TIMEOUT_SECONDS,
@@ -106,7 +106,7 @@ class IRBlasterBLE:
                 "Connected to %s", sanitize_log_message(device.name or device.address)
             )
             return True
-        except TimeoutError:
+        except asyncio.TimeoutError:
             logger.error(
                 "BLE connect timed out after %.0fs to %s",
                 CONNECT_HARD_TIMEOUT_SECONDS,
