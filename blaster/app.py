@@ -211,7 +211,9 @@ class AppController:
                     "after connect",
                     on_sent=self._on_command_sent,
                 )
-            return True
+            # Report the link state we actually ended with: the device can drop
+            # us again while we are still arming it.
+            return self.ble.is_connected
         finally:
             self._reconnecting = False
 
@@ -220,6 +222,8 @@ class AppController:
             await self.ble.wait_until_ready()
         except TimeoutError as e:
             logger.warning("%s", sanitize_log_message(e))
+            return
+        if not self.ble.is_connected:
             return
         # Configure disconnect schedule before OnConnect commands.
         await self._restart_schedule()
@@ -282,6 +286,20 @@ class AppController:
         if self._reconnect_task is None or self._reconnect_task.done():
             self._reconnect_task = asyncio.create_task(self._auto_reconnect())
 
+    def _supervise_connection(self) -> None:
+        """
+        Level-triggered safety net for the retry loop.
+
+        Relying only on the disconnect callback to arm reconnection is not enough:
+        the callback can fire while _auto_reconnect is still inside
+        _connect_and_arm_locked, see a task that is not done yet, decline to start
+        a new one, and then that task exits — leaving nothing scheduled. Re-checking
+        the actual link state every tick means a dropped edge cannot strand the app.
+        """
+        if not self._running or self._reconnecting or self.ble.is_connected:
+            return
+        self._ensure_reconnect_task()
+
     async def _auto_reconnect(self) -> None:
         while self._running:
             await asyncio.sleep(RECONNECT_INTERVAL_SECONDS)
@@ -326,6 +344,7 @@ class AppController:
     async def _tick_loop(self) -> None:
         while True:
             await asyncio.sleep(1.0)
+            self._supervise_connection()
             cmd = self.sm.update(self._av_active)
             if cmd is not None and self.ble.is_connected:
                 await execute_specs(
