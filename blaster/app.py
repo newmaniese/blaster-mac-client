@@ -20,6 +20,8 @@ from blaster.utils import execute_specs, sanitize_log_message
 logger = logging.getLogger("blaster")
 
 RECONNECT_INTERVAL_SECONDS = 5.0
+# Must stay below the ESP32 BLE_LINK_IDLE_TIMEOUT_MS (default 180s).
+HEARTBEAT_INTERVAL_SECONDS = 60.0
 
 
 class AppController:
@@ -40,6 +42,7 @@ class AppController:
         self.mic = False
         self._av_active = False
         self._reconnect_task: asyncio.Task[None] | None = None
+        self._heartbeat_task: asyncio.Task[None] | None = None
         self._av_task: asyncio.Task[None] | None = None
         self._tick_task: asyncio.Task[None] | None = None
 
@@ -113,6 +116,7 @@ class AppController:
         """Cancel tasks and disconnect cleanly."""
         self._running = False
         await self._cancel_reconnect()
+        await self._cancel_heartbeat()
         if self._av_task is not None:
             self._av_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -176,6 +180,7 @@ class AppController:
     async def _safe_restart_locked(self) -> None:
         """Disconnect, rebuild BLE/SM from current config, reconnect and re-arm."""
         await self._cancel_reconnect()
+        await self._cancel_heartbeat()
         self.ble.set_disconnect_callback(None)
         await self.ble.disconnect()
 
@@ -224,6 +229,7 @@ class AppController:
             "on connect",
             on_sent=self._on_command_sent,
         )
+        await self._start_heartbeat()
 
     async def _restart_schedule(self) -> None:
         """Configure the device's disconnect-delayed command (countdown starts on disconnect)."""
@@ -239,8 +245,34 @@ class AppController:
                     "Schedule disconnect command failed: %s", sanitize_log_message(e)
                 )
 
+    async def _start_heartbeat(self) -> None:
+        """Keep the ESP32 GATT-idle watchdog fed while connected."""
+        await self._cancel_heartbeat()
+        if not self._running or not self.ble.is_connected:
+            return
+        self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+
+    async def _heartbeat_loop(self) -> None:
+        while self._running and self.ble.is_connected:
+            await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
+            if not self._running or not self.ble.is_connected:
+                return
+            try:
+                await self.ble.send_heartbeat()
+            except (BleakError, asyncio.TimeoutError, RuntimeError) as e:
+                logger.warning("Heartbeat failed: %s", sanitize_log_message(e))
+                return
+
+    async def _cancel_heartbeat(self) -> None:
+        if self._heartbeat_task is not None:
+            self._heartbeat_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._heartbeat_task
+            self._heartbeat_task = None
+
     async def _on_disconnect(self) -> None:
         logger.warning("BLE disconnected")
+        await self._cancel_heartbeat()
         self._ensure_reconnect_task()
 
     def _ensure_reconnect_task(self) -> None:

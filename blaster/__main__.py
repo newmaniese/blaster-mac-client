@@ -10,13 +10,9 @@ import sys
 from pathlib import Path
 
 from blaster.app import AppController
+from blaster.logging_setup import configure_logging
 from blaster.web import DEFAULT_HOST, DEFAULT_PORT, start_web
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
 logger = logging.getLogger("blaster")
 
 
@@ -49,7 +45,26 @@ def main() -> None:
         default=DEFAULT_PORT,
         help=f"HTTP UI port (default {DEFAULT_PORT})",
     )
+    parser.add_argument(
+        "--log-level",
+        default=None,
+        metavar="LEVEL",
+        help="DEBUG, INFO, WARNING, or ERROR (default: BLASTER_LOG_LEVEL or INFO)",
+    )
+    parser.add_argument(
+        "--log-dir",
+        type=Path,
+        default=None,
+        help="Directory for rotating blaster.log (default: ~/Library/Logs/blaster-mac-client)",
+    )
     args = parser.parse_args()
+
+    try:
+        log_path = configure_logging(args.log_level, log_dir=args.log_dir)
+    except ValueError as e:
+        parser.error(str(e))
+
+    logger.info("Logging to %s", log_path)
 
     try:
         asyncio.run(run(config_path=args.config, host=args.host, port=args.port))

@@ -422,6 +422,19 @@ class TestIRBlasterBLE(unittest.IsolatedAsyncioTestCase):
         expected_payload = json.dumps({"delay_seconds": 900, "command": "Off"}).encode("utf-8")
         mock_client.write_gatt_char.assert_called_once_with(CHAR_SCHEDULE_UUID, expected_payload)
 
+    async def test_send_heartbeat(self) -> None:
+        config = BLEConfig(device_name="IR Blaster")
+        ble = IRBlasterBLE(config)
+        mock_client = MagicMock()
+        mock_client.is_connected = True
+        mock_client.write_gatt_char = AsyncMock()
+        ble._client = mock_client
+
+        await ble.send_heartbeat()
+
+        expected = json.dumps({"heartbeat": True}).encode("utf-8")
+        mock_client.write_gatt_char.assert_called_once_with(CHAR_SCHEDULE_UUID, expected)
+
     async def test_schedule_disconnect_command_negative_delay(self) -> None:
         config = BLEConfig(device_name="IR Blaster")
         ble = IRBlasterBLE(config)

@@ -223,6 +223,12 @@ class IRBlasterBLE:
         payload = json.dumps({"delay_seconds": delay_seconds, "command": command_name})
         await self._client.write_gatt_char(CHAR_SCHEDULE_UUID, payload.encode("utf-8"))
 
+    async def send_heartbeat(self) -> None:
+        """Write a Schedule keepalive so the ESP32 GATT-idle watchdog does not drop the link."""
+        self._ensure_connected()
+        payload = json.dumps({"heartbeat": True})
+        await self._client.write_gatt_char(CHAR_SCHEDULE_UUID, payload.encode("utf-8"))
+
     async def send_command(self, index: int) -> str:
         """
         Write the saved-code index to the Send Command characteristic and wait for

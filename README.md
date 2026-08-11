@@ -41,7 +41,7 @@ sequenceDiagram
 
 - **Camera/mic detection:** Uses macOS `log stream` with the same control-center “sensor-indicators” events that drive the menu bar dots. No polling; events only when state changes.
 - **State machine:** IDLE → ACTIVE (cam or mic on) → COOLDOWN (both off) → IDLE after the Idle cooldown. The client sends the **Active** command (e.g. Red) when entering ACTIVE and the **Idle** command (e.g. Green) when returning to IDLE.
-- **BLE:** Scans for the configured device name in the **advertised** BLE local name, reads Saved Codes to resolve command **names** to indices, and sends commands by name. On connect it runs **OnConnect** and configures the disconnect **Schedule**. It retries automatically if the device is missing or the link drops.
+- **BLE:** Scans for the configured device name in the **advertised** BLE local name, reads Saved Codes to resolve command **names** to indices, and sends commands by name. On connect it runs **OnConnect** and configures the disconnect **Schedule**. While connected it sends Schedule heartbeats every 60s so the ESP32’s GATT-idle watchdog does not drop a healthy idle link. It retries automatically if the device is missing or the link drops.
 
 ## Requirements
 
@@ -68,7 +68,7 @@ The installer:
 
 Open the management UI: **[http://127.0.0.1:8765](http://127.0.0.1:8765)**
 
-Logs: `~/Library/Logs/blaster-mac-client/stdout.log` and `stderr.log`.
+Logs (rotated): `~/Library/Logs/blaster-mac-client/blaster.log` (and `blaster.log.1` …). LaunchAgent still captures process stderr at `stderr.log`, but the app only mirrors WARNING+ there when not attached to a terminal. Set `BLASTER_LOG_LEVEL=DEBUG` (or pass `--log-level DEBUG`) when debugging.
 
 After installing you can delete the unzipped folder. To remove the installed app: run `./uninstall.sh` from a copy of the project, or see [Uninstall](#uninstall).
 
@@ -215,6 +215,9 @@ Logs under `~/Library/Logs/blaster-mac-client` are left in place.
 - **`Operation not permitted` in the LaunchAgent logs**  
   The agent is still pointed at a privacy-protected folder. Run `./install.sh` again so it lives under `~/Library/Application Support/blaster-mac-client`.
 
+- **Need more detail in the logs**  
+  Re-run with `--log-level DEBUG`, or set `BLASTER_LOG_LEVEL=DEBUG` in the LaunchAgent environment and reload. App output lives in `~/Library/Logs/blaster-mac-client/blaster.log` (rotated at 2 MiB × 5).
+
 ## Packaging for GitHub Releases
 
 Maintainers: from the project root,
@@ -259,6 +262,7 @@ blaster-mac-client/
   blaster/
     __main__.py         # Entry point (python -m blaster)
     app.py              # AppController: BLE lifecycle, status, reconnect, config restart
+    logging_setup.py    # Log levels + rotating blaster.log
     web.py              # Localhost HTTP UI + JSON API (default :8765)
     static/             # Status / controls / config UI
     config.py           # Load/save config with defaults

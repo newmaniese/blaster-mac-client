@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Uninstaller: stop the LaunchAgent and remove the installed copy of Blaster Mac Client.
-# Logs in ~/Library/Logs/blaster-mac-client are left in place.
+# Rotating logs in ~/Library/Logs/blaster-mac-client are left in place.
 #
 # Usage: ./uninstall.sh
 

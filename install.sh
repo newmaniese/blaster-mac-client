@@ -28,6 +28,10 @@ launchctl unload "$PLIST_DEST" 2>/dev/null || true
 
 mkdir -p "$INSTALL_DIR" "$LOG_DIR" "$HOME/Library/LaunchAgents"
 
+# Truncate legacy launchd capture files so a prior flood does not linger.
+: > "$LOG_DIR/stdout.log"
+: > "$LOG_DIR/stderr.log"
+
 echo "Installing to $INSTALL_DIR"
 rsync -a --delete \
 	--exclude '.venv/' \
@@ -81,7 +85,8 @@ echo ""
 echo "Blaster Mac Client is installed and running."
 echo "  • Installed at: $INSTALL_DIR"
 echo "  • Starts automatically at login, restarts if it exits or crashes"
-echo "  • Logs: $LOG_DIR/stdout.log  $LOG_DIR/stderr.log"
+echo "  • App log (rotated): $LOG_DIR/blaster.log"
+echo "  • LaunchAgent capture: $LOG_DIR/stderr.log (warnings/errors only)"
 echo ""
 echo "Management UI: http://127.0.0.1:8765"
 echo ""

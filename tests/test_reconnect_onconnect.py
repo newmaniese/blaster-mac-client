@@ -1,6 +1,7 @@
 """Tests that OnConnect events run on initial connect and again after BLE reconnect."""
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -42,6 +43,7 @@ async def test_onconnect_fires_on_initial_connect(minimal_config) -> None:
     mock_ble.connect = AsyncMock(return_value=True)
     mock_ble.wait_until_ready = AsyncMock()
     mock_ble.schedule_disconnect_command = AsyncMock()
+    mock_ble.send_heartbeat = AsyncMock()
     mock_ble.disconnect = AsyncMock()
     mock_ble.send_command_by_name = AsyncMock(return_value="OK:test")
     mock_ble.set_disconnect_callback = MagicMock()
@@ -63,6 +65,8 @@ async def test_onconnect_fires_on_initial_connect(minimal_config) -> None:
                 "OnConnect should run at least once on initial connect"
             )
             assert on_connect_calls[0][1] == "on connect"
+            assert ctrl._heartbeat_task is not None
+            assert not ctrl._heartbeat_task.done()
         finally:
             await ctrl.stop()
 
@@ -86,6 +90,7 @@ async def test_onconnect_fires_after_reconnect(minimal_config) -> None:
     mock_ble.connect = AsyncMock(side_effect=connect_and_mark)
     mock_ble.wait_until_ready = AsyncMock()
     mock_ble.schedule_disconnect_command = AsyncMock()
+    mock_ble.send_heartbeat = AsyncMock()
     mock_ble.disconnect = AsyncMock()
     mock_ble.send_command_by_name = AsyncMock(return_value="OK:test")
     mock_ble.set_disconnect_callback = MagicMock()
@@ -142,6 +147,7 @@ async def test_schedule_configured_before_onconnect_commands(minimal_config) -> 
     mock_ble.schedule_disconnect_command = AsyncMock(
         side_effect=lambda *_a, **_k: events.append("schedule")
     )
+    mock_ble.send_heartbeat = AsyncMock()
     mock_ble.disconnect = AsyncMock()
     mock_ble.send_command_by_name = AsyncMock(return_value="OK:test")
     mock_ble.set_disconnect_callback = MagicMock()
@@ -159,7 +165,8 @@ async def test_schedule_configured_before_onconnect_commands(minimal_config) -> 
             assert events[0] == "schedule", (
                 f"schedule must be configured before any commands, got {events}"
             )
-            assert not hasattr(ctrl, "_heartbeat_task")
+            assert ctrl._heartbeat_task is not None
+            assert not ctrl._heartbeat_task.done()
 
             events.clear()
             connected[0] = False
@@ -170,5 +177,51 @@ async def test_schedule_configured_before_onconnect_commands(minimal_config) -> 
             )
             assert "specs:on connect" in events
             mock_ble.schedule_disconnect_command.assert_called()
+        finally:
+            await ctrl.stop()
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_loop_sends_while_connected(minimal_config) -> None:
+    """While connected, the controller periodically writes Schedule heartbeats."""
+    import blaster.app as app_module
+    from blaster.app import AppController
+
+    _cfg, path = minimal_config
+    connected = [True]
+    heartbeats: list[int] = []
+
+    async def connect_and_mark():
+        connected[0] = True
+        return True
+
+    async def record_heartbeat():
+        heartbeats.append(len(heartbeats))
+
+    mock_ble = MagicMock()
+    mock_ble.connect = AsyncMock(side_effect=connect_and_mark)
+    mock_ble.wait_until_ready = AsyncMock()
+    mock_ble.schedule_disconnect_command = AsyncMock()
+    mock_ble.send_heartbeat = AsyncMock(side_effect=record_heartbeat)
+    mock_ble.disconnect = AsyncMock()
+    mock_ble.send_command_by_name = AsyncMock(return_value="OK:test")
+    mock_ble.set_disconnect_callback = MagicMock()
+    type(mock_ble).is_connected = property(lambda self: connected[0])
+
+    with (
+        patch("blaster.app.IRBlasterBLE", return_value=mock_ble),
+        patch("blaster.app.execute_specs", new=AsyncMock()),
+        patch("blaster.app.get_initial_state", return_value=(False, False)),
+        patch("blaster.app.stream_av_events", return_value=_never_yield()),
+        patch.object(app_module, "HEARTBEAT_INTERVAL_SECONDS", 0.01),
+    ):
+        ctrl = AppController(path)
+        await ctrl.start()
+        try:
+            for _ in range(50):
+                if len(heartbeats) >= 2:
+                    break
+                await asyncio.sleep(0.02)
+            assert len(heartbeats) >= 2
         finally:
             await ctrl.stop()

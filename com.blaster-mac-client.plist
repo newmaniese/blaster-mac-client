@@ -28,6 +28,10 @@
 		<string>INSTALL_DIR</string>
 		<key>PYTHONUNBUFFERED</key>
 		<string>1</string>
+		<key>BLASTER_LOG_LEVEL</key>
+		<string>INFO</string>
+		<key>BLASTER_LOG_DIR</key>
+		<string>LOG_DIR</string>
 	</dict>
 </dict>
 </plist>

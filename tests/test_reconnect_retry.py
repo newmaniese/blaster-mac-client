@@ -34,6 +34,7 @@ def _mock_ble(connect: AsyncMock, connected: list[bool]) -> MagicMock:
     ble.connect = connect
     ble.wait_until_ready = AsyncMock()
     ble.schedule_disconnect_command = AsyncMock()
+    ble.send_heartbeat = AsyncMock()
     ble.disconnect = AsyncMock()
     ble.send_command_by_name = AsyncMock(return_value="OK:test")
     ble.set_disconnect_callback = MagicMock()

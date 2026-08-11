@@ -35,6 +35,7 @@ class TestMainAVLoop(unittest.IsolatedAsyncioTestCase):
             mock_ble.connect = AsyncMock(return_value=True)
             mock_ble.wait_until_ready = AsyncMock()
             mock_ble.schedule_disconnect_command = AsyncMock()
+            mock_ble.send_heartbeat = AsyncMock()
             mock_ble.disconnect = AsyncMock()
             mock_ble.is_connected = True
             mock_ble.set_disconnect_callback = MagicMock()

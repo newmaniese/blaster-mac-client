@@ -53,6 +53,7 @@ async def client(tmp_path: Path):
         ble.disconnect = AsyncMock()
         ble.wait_until_ready = AsyncMock()
         ble.schedule_disconnect_command = AsyncMock()
+        ble.send_heartbeat = AsyncMock()
         ble.send_command_by_name = AsyncMock(return_value="OK:Red")
         ble.get_saved_codes = AsyncMock(
             return_value=[{"n": "Red", "i": 0}, {"n": "Green", "i": 1}]

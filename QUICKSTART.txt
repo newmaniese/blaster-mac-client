@@ -24,7 +24,8 @@ Blaster Mac Client — run on this Mac
      • Reconnect and send saved IR commands
      • Edit device name and OnConnect / OnDisconnect / Active / Idle, then Save & apply
 
-   Logs: ~/Library/Logs/blaster-mac-client/stdout.log and stderr.log
+   Logs: ~/Library/Logs/blaster-mac-client/blaster.log (rotated)
+   Debug: BLASTER_LOG_LEVEL=DEBUG or python -m blaster --log-level DEBUG
 
    After installing, you can delete this unzipped folder.
 

@@ -39,6 +39,7 @@ def _mock_ble(connected: bool = True) -> MagicMock:
     ble.disconnect = AsyncMock()
     ble.wait_until_ready = AsyncMock()
     ble.schedule_disconnect_command = AsyncMock()
+    ble.send_heartbeat = AsyncMock()
     ble.send_command_by_name = AsyncMock(return_value="OK:Red")
     ble.get_saved_codes = AsyncMock(
         return_value=[{"name": "Red", "index": 0}, {"name": "Green", "index": 1}]
