@@ -57,6 +57,20 @@ def test_cooldown_to_idle_after_delay(sm: AVStateMachine) -> None:
     assert sm.state == State.IDLE
 
 
+def test_desired_command_follows_state(sm: AVStateMachine) -> None:
+    assert sm.desired_command == "Idle"
+    sm.update(True)
+    assert sm.desired_command == "Active"
+    now = time.monotonic()
+    sm.update(False, now=now)
+    # Cooldown still wants the active colour; Idle only lands once it expires.
+    assert sm.state == State.COOLDOWN
+    assert sm.desired_command == "Active"
+    sm.update(False, now=now + 2)
+    assert sm.state == State.IDLE
+    assert sm.desired_command == "Idle"
+
+
 def test_idle_stays_idle_when_av_off(sm: AVStateMachine) -> None:
     cmd = sm.update(False)
     assert cmd is None

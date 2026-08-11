@@ -36,7 +36,7 @@ async def test_onconnect_fires_on_initial_connect(minimal_config) -> None:
     _cfg, path = minimal_config
     spec_calls: list[tuple] = []
 
-    async def record_execute_specs(ble, specs, context="", on_sent=None):
+    async def record_execute_specs(ble, specs, context="", on_sent=None, **kwargs):
         spec_calls.append((specs, context))
 
     mock_ble = MagicMock()
@@ -77,7 +77,7 @@ async def test_onconnect_fires_after_reconnect(minimal_config) -> None:
     _cfg, path = minimal_config
     spec_calls: list[tuple] = []
 
-    async def record_execute_specs(ble, specs, context="", on_sent=None):
+    async def record_execute_specs(ble, specs, context="", on_sent=None, **kwargs):
         spec_calls.append((specs, context))
 
     connected = [True]
@@ -132,7 +132,7 @@ async def test_schedule_configured_before_onconnect_commands(minimal_config) -> 
     _cfg, path = minimal_config
     events: list[str] = []
 
-    async def record_execute_specs(ble, specs, context="", on_sent=None):
+    async def record_execute_specs(ble, specs, context="", on_sent=None, **kwargs):
         events.append(f"specs:{context}")
 
     connected = [True]

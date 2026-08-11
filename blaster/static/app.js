@@ -15,6 +15,8 @@
   const configForm = $("config-form");
   const configMsg = $("config-msg");
   const deviceNameInput = $("device_name_input");
+  const activityLog = $("activity-log");
+  const activityEmpty = $("activity-empty");
 
   const EVENT_CONTAINERS = {
     OnConnect: $("onconnect-rows"),
@@ -23,8 +25,11 @@
     Idle: $("idle-rows"),
   };
 
+  const ACTIVITY_MAX = 100;
   let configCache = null;
   let commandsLoaded = false;
+  // Anchor to current seq on first poll so only events while the page is open are shown.
+  let lastEventId = null;
 
   function setMsg(text, kind) {
     configMsg.textContent = text || "";
@@ -120,6 +125,50 @@
       .replace(/</g, "&lt;");
   }
 
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function formatTs(iso) {
+    try {
+      return new Date(iso).toLocaleTimeString(undefined, { hour12: false });
+    } catch {
+      return iso || "";
+    }
+  }
+
+  function appendActivity(events) {
+    if (!Array.isArray(events)) return;
+    if (lastEventId === null) {
+      lastEventId = events.length ? events[events.length - 1].id : 0;
+      return;
+    }
+    const fresh = events.filter((e) => e.id > lastEventId);
+    if (!fresh.length) return;
+    lastEventId = fresh[fresh.length - 1].id;
+    if (activityEmpty) activityEmpty.hidden = true;
+    // Oldest of the batch first so prepend keeps newest on top.
+    for (let i = fresh.length - 1; i >= 0; i--) {
+      const e = fresh[i];
+      const row = document.createElement("div");
+      row.className = "activity-entry";
+      row.dataset.kind = e.kind || "info";
+      row.innerHTML =
+        `<span class="activity-ts">${escapeHtml(formatTs(e.ts))}</span>` +
+        `<span class="activity-msg">${escapeHtml(e.message || "")}</span>`;
+      activityLog.prepend(row);
+    }
+    while (activityLog.querySelectorAll(".activity-entry").length > ACTIVITY_MAX) {
+      const last = activityLog.querySelector(".activity-entry:last-of-type");
+      if (!last) break;
+      last.remove();
+    }
+  }
+
   function renderEventRows(key, specs) {
     const container = EVENT_CONTAINERS[key];
     container.innerHTML = "";
@@ -199,6 +248,7 @@
     try {
       const s = await api("/api/status");
       renderStatus(s);
+      appendActivity(s.events);
       if (s.connected && !commandsLoaded) {
         await loadCommands();
       }
@@ -236,6 +286,7 @@
         body: JSON.stringify({ name }),
       });
       renderStatus(result);
+      appendActivity(result.events);
     } catch (e) {
       setMsg(String(e.message || e), "err");
     } finally {
@@ -248,6 +299,7 @@
     try {
       const result = await api("/api/reconnect", { method: "POST", body: "{}" });
       renderStatus(result);
+      appendActivity(result.events);
       if (result.connected) {
         await loadCommands();
       }
@@ -288,6 +340,7 @@
       });
       renderConfig(result.config);
       renderStatus(result);
+      appendActivity(result.events);
       setMsg("Saved and applied.", "ok");
       if (result.connected) {
         await loadCommands();

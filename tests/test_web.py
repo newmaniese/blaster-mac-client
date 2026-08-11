@@ -84,6 +84,9 @@ async def test_get_status(client) -> None:
     assert data["cam"] is True
     assert data["mic"] is False
     assert data["device_name"] == "API Blaster"
+    assert isinstance(data["events"], list)
+    assert data["events"]
+    assert {"id", "ts", "kind", "message"} <= set(data["events"][-1])
 
 
 @pytest.mark.asyncio
@@ -156,3 +159,5 @@ async def test_index_page(client) -> None:
     assert resp.status == 200
     text = await resp.text()
     assert "Blaster" in text
+    assert "Activity" in text
+    assert 'id="activity-log"' in text

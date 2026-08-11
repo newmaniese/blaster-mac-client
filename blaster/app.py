@@ -6,6 +6,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +16,7 @@ from bleak import BleakError
 from blaster.av_monitor import get_initial_state, stream_av_events
 from blaster.ble_client import IRBlasterBLE
 from blaster.config import Config, default_config_path, schedule_delay_seconds
-from blaster.state_machine import AVStateMachine
+from blaster.state_machine import AVStateMachine, CommandEvent
 from blaster.utils import execute_specs, sanitize_log_message
 
 logger = logging.getLogger("blaster")
@@ -22,6 +24,7 @@ logger = logging.getLogger("blaster")
 RECONNECT_INTERVAL_SECONDS = 5.0
 # Must stay below the ESP32 BLE_LINK_IDLE_TIMEOUT_MS (default 180s).
 HEARTBEAT_INTERVAL_SECONDS = 60.0
+EVENT_LOG_MAX = 100
 
 
 class AppController:
@@ -45,6 +48,8 @@ class AppController:
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._av_task: asyncio.Task[None] | None = None
         self._tick_task: asyncio.Task[None] | None = None
+        self._events: deque[dict[str, Any]] = deque(maxlen=EVENT_LOG_MAX)
+        self._event_seq = 0
 
     def _idle_delay(self) -> float:
         idle = self.config.events.Idle
@@ -56,9 +61,69 @@ class AppController:
         specs = self.config.events.OnDisconnect
         return specs[0] if specs else None
 
-    def _on_command_sent(self, name: str, status: str) -> None:
+    def _add_event(self, message: str, kind: str = "info") -> None:
+        """Append a UI-facing activity event (ring buffer)."""
+        self._event_seq += 1
+        self._events.append(
+            {
+                "id": self._event_seq,
+                "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "kind": kind,
+                "message": sanitize_log_message(message),
+            }
+        )
+
+    def _on_command_sent(self, name: str, status: str, context: str = "") -> None:
         self.last_command = name
         self.last_status = status
+        ctx = f" ({context})" if context else ""
+        self._add_event(f"Sent {name}{ctx} → {status}", "send")
+
+    def _command_sent_cb(self, context: str = ""):
+        return lambda name, status: self._on_command_sent(name, status, context)
+
+    async def _dispatch(self, key: CommandEvent, context: str = "") -> None:
+        """
+        Run the Active/Idle command list for a state the machine just entered.
+
+        Any wait inside the list is a window for the opposite state to arrive,
+        so the send is abandoned if the machine has moved on: without that, an
+        Idle command queued at the start of a break lands minutes later and
+        overwrites the Active colour of a meeting that has already resumed.
+        """
+        if not self.ble.is_connected:
+            return
+        await execute_specs(
+            self.ble,
+            getattr(self.config.events, key),
+            context,
+            on_sent=self._command_sent_cb(context or key),
+            # Idle[0].Delay is the cooldown, already served before we got here.
+            skip_first_delay=(key == "Idle"),
+            still_wanted=lambda: self.sm.desired_command == key,
+        )
+
+    async def _assert_current_state(self, context: str) -> None:
+        """
+        Force the lights to match the current AV state after a (re)connect.
+
+        OnConnect replays a fixed sequence that can leave the wrong colour
+        showing, and update() only fires on transitions — so a drop mid-meeting
+        would otherwise stay on the connect colour until the next idle→active
+        edge, which never comes while that meeting is still running.
+        """
+        if not self.ble.is_connected:
+            return
+        specs = getattr(self.config.events, self.sm.desired_command)
+        if not specs or specs[0].NamedCommand == self.last_command:
+            return
+        await execute_specs(
+            self.ble,
+            specs[:1],
+            context,
+            on_sent=self._command_sent_cb(context),
+            skip_first_delay=True,
+        )
 
     def status(self) -> dict[str, Any]:
         return {
@@ -71,6 +136,7 @@ class AppController:
             "last_status": self.last_status,
             "device_name": self.config.ble.device_name,
             "error": self._error,
+            "events": list(self._events),
         }
 
     def config_dict(self) -> dict[str, Any]:
@@ -89,25 +155,23 @@ class AppController:
         self._av_active = initial_cam or initial_mic
 
         logger.info("Connecting to IR Blaster...")
+        self._add_event("Connecting to IR Blaster…", "conn")
         connected = await self.ble.connect()
         if not connected:
             self._error = (
                 "Could not find or connect to IR Blaster. Ensure it is on and paired."
             )
             logger.error("%s", self._error)
+            self._add_event(self._error, "error")
             self._ensure_reconnect_task()
         else:
             self._error = None
             await self._run_after_connect()
             logger.info("Connected. Monitoring camera/mic...")
-            cmd = self.sm.update(self._av_active)
-            if cmd is not None:
-                await execute_specs(
-                    self.ble,
-                    getattr(self.config.events, cmd),
-                    "initial",
-                    on_sent=self._on_command_sent,
-                )
+            self._add_event("Connected. Monitoring camera/mic…", "conn")
+            # Advance the machine, then colour from state rather than the edge.
+            self.sm.update(self._av_active)
+            await self._assert_current_state("initial")
 
         self._av_task = asyncio.create_task(self._av_loop())
         self._tick_task = asyncio.create_task(self._tick_loop())
@@ -152,6 +216,9 @@ class AppController:
         async with self._lock:
             new_config.save(self.config_path)
             self.config = new_config
+            self._add_event(
+                f"Config saved (device: {self.config.ble.device_name})", "config"
+            )
             await self._safe_restart_locked()
             return {"ok": True, "config": self.config.to_dict(), **self.status()}
 
@@ -159,8 +226,12 @@ class AppController:
         """Send a named IR command immediately."""
         if not self.ble.is_connected:
             raise RuntimeError("Not connected to IR Blaster")
-        status = await self.ble.send_command_by_name(name)
-        self._on_command_sent(name, status)
+        try:
+            status = await self.ble.send_command_by_name(name)
+        except Exception as e:
+            self._add_event(f"Send {name} failed: {e}", "error")
+            raise
+        self._on_command_sent(name, status, "manual")
         return {"ok": True, "name": name, "status": status, **self.status()}
 
     async def list_commands(self) -> list[str]:
@@ -194,23 +265,21 @@ class AppController:
         self._reconnecting = True
         try:
             logger.info("Connecting to IR Blaster...")
+            self._add_event("Connecting to IR Blaster…", "conn")
             if not await self.ble.connect():
                 self._error = (
                     "Could not find or connect to IR Blaster. Ensure it is on and paired."
                 )
                 logger.error("%s", self._error)
+                self._add_event(self._error, "error")
                 self._ensure_reconnect_task()
                 return False
             self._error = None
             await self._run_after_connect()
-            cmd = self.sm.update(self._av_active)
-            if cmd is not None and self.ble.is_connected:
-                await execute_specs(
-                    self.ble,
-                    getattr(self.config.events, cmd),
-                    "after connect",
-                    on_sent=self._on_command_sent,
-                )
+            if self.ble.is_connected:
+                self._add_event("Connected to IR Blaster", "conn")
+            self.sm.update(self._av_active)
+            await self._assert_current_state("after connect")
             # Report the link state we actually ended with: the device can drop
             # us again while we are still arming it.
             return self.ble.is_connected
@@ -222,6 +291,7 @@ class AppController:
             await self.ble.wait_until_ready()
         except TimeoutError as e:
             logger.warning("%s", sanitize_log_message(e))
+            self._add_event(f"Ready wait timed out: {e}", "error")
             return
         if not self.ble.is_connected:
             return
@@ -231,7 +301,7 @@ class AppController:
             self.ble,
             self.config.events.OnConnect,
             "on connect",
-            on_sent=self._on_command_sent,
+            on_sent=self._command_sent_cb("on connect"),
         )
         await self._start_heartbeat()
 
@@ -276,6 +346,7 @@ class AppController:
 
     async def _on_disconnect(self) -> None:
         logger.warning("BLE disconnected")
+        self._add_event("BLE disconnected", "conn")
         await self._cancel_heartbeat()
         self._ensure_reconnect_task()
 
@@ -309,6 +380,7 @@ class AppController:
                 if self.ble.is_connected:
                     return
                 logger.info("Reconnecting to IR Blaster...")
+                self._add_event("Reconnecting to IR Blaster…", "conn")
                 if await self._connect_and_arm_locked():
                     return
 
@@ -319,24 +391,28 @@ class AppController:
                 await self._reconnect_task
             self._reconnect_task = None
 
+    def _note_av_change(self, cam: bool, mic: bool) -> None:
+        if cam != self.cam:
+            self._add_event(f"Camera {'on' if cam else 'off'}", "av")
+        if mic != self.mic:
+            self._add_event(f"Mic {'on' if mic else 'off'}", "av")
+
     async def _av_loop(self) -> None:
         while True:
             try:
                 async for cam, mic in stream_av_events():
+                    self._note_av_change(cam, mic)
                     self.cam = cam
                     self.mic = mic
                     self._av_active = cam or mic
                     cmd = self.sm.update(self._av_active)
-                    if cmd is not None and self.ble.is_connected:
-                        await execute_specs(
-                            self.ble,
-                            getattr(self.config.events, cmd),
-                            on_sent=self._on_command_sent,
-                        )
+                    if cmd is not None:
+                        await self._dispatch(cmd)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
                 logger.exception("AV stream error: %s", sanitize_log_message(e))
+                self._add_event(f"AV stream error: {e}", "error")
 
             logger.warning("AV stream ended unexpectedly. Restarting in 1 second...")
             await asyncio.sleep(1.0)
@@ -346,10 +422,5 @@ class AppController:
             await asyncio.sleep(1.0)
             self._supervise_connection()
             cmd = self.sm.update(self._av_active)
-            if cmd is not None and self.ble.is_connected:
-                await execute_specs(
-                    self.ble,
-                    getattr(self.config.events, cmd),
-                    "cooldown",
-                    on_sent=self._on_command_sent,
-                )
+            if cmd is not None:
+                await self._dispatch(cmd, "cooldown")

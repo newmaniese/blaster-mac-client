@@ -40,8 +40,8 @@ sequenceDiagram
 ```
 
 - **Camera/mic detection:** Uses macOS `log stream` with the same control-center “sensor-indicators” events that drive the menu bar dots. No polling; events only when state changes.
-- **State machine:** IDLE → ACTIVE (cam or mic on) → COOLDOWN (both off) → IDLE after the Idle cooldown. The client sends the **Active** command (e.g. Red) when entering ACTIVE and the **Idle** command (e.g. Green) when returning to IDLE.
-- **BLE:** Scans for the configured device name in the **advertised** BLE local name, reads Saved Codes to resolve command **names** to indices, and sends commands by name. On connect it runs **OnConnect** and configures the disconnect **Schedule**. While connected it sends Schedule heartbeats every 60s so the ESP32’s GATT-idle watchdog does not drop a healthy idle link. It retries automatically if the device is missing or the link drops.
+- **State machine:** IDLE → ACTIVE (cam or mic on) → COOLDOWN (both off) → IDLE after the Idle cooldown. The client sends the **Active** command (e.g. Red) when entering ACTIVE and the **Idle** command (e.g. Green) when returning to IDLE. A command with a `Delay` is dropped if cam/mic state changes while it waits, so a late send cannot leave the wrong color showing.
+- **BLE:** Scans for the configured device name in the **advertised** BLE local name, reads Saved Codes to resolve command **names** to indices, and sends commands by name. On connect it runs **OnConnect** and configures the disconnect **Schedule**, then re-sends the Active or Idle command if **OnConnect** left a color that disagrees with the current camera/mic state. While connected it sends Schedule heartbeats every 60s so the ESP32’s GATT-idle watchdog does not drop a healthy idle link. It retries automatically if the device is missing or the link drops.
 
 ## Requirements
 

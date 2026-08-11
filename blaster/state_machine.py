@@ -35,6 +35,18 @@ class AVStateMachine:
     def state(self) -> State:
         return self._state
 
+    @property
+    def desired_command(self) -> CommandEvent:
+        """
+        Event key matching the current state, independent of any transition.
+
+        update() only returns a command on an edge, so it cannot re-assert a
+        colour that something else overwrote (a replayed OnConnect sequence, or
+        a delayed command that landed late). Callers use this to ask what the
+        lights *should* be showing right now.
+        """
+        return "Idle" if self._state == State.IDLE else "Active"
+
     def update(self, av_active: bool, now: float | None = None) -> CommandEvent | None:
         """
         Update with current camera/mic activity. Returns "Active" or "Idle" when

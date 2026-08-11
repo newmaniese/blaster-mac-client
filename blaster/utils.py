@@ -13,6 +13,8 @@ logger = logging.getLogger("blaster.utils")
 
 # Optional callback: (command_name, status_string) after a successful send.
 OnCommandSent = Callable[[str, str], None]
+# Checked after each delay: return False to abandon the rest of the sequence.
+StillWanted = Callable[[], bool]
 
 
 def sanitize_log_message(msg: Any) -> str:
@@ -25,6 +27,9 @@ async def execute_specs(
     specs: list[EventSpec],
     context: str = "",
     on_sent: OnCommandSent | None = None,
+    *,
+    skip_first_delay: bool = False,
+    still_wanted: StillWanted | None = None,
 ) -> None:
     """
     Executes a list of event specifications.
@@ -34,12 +39,25 @@ async def execute_specs(
       - Tries to send the command by name using the BLE client.
       - Logs the outcome with context.
       - Calls on_sent(name, status) on success.
+
+    skip_first_delay drops the leading wait for callers that already served it.
+    still_wanted is re-checked after every delay; a False result abandons the
+    remaining specs, so a sequence cannot outlive the condition that queued it.
     """
-    for spec in specs:
-        if spec.Delay and spec.Delay > 0:
-            await asyncio.sleep(spec.Delay)
+    for index, spec in enumerate(specs):
+        delay = 0 if (index == 0 and skip_first_delay) else spec.Delay
+        if delay and delay > 0:
+            await asyncio.sleep(delay)
 
         ctx_str = f" ({context})" if context else ""
+
+        if still_wanted is not None and not still_wanted():
+            logger.info(
+                "Skipped %s%s: superseded while waiting",
+                sanitize_log_message(spec.NamedCommand),
+                sanitize_log_message(ctx_str),
+            )
+            return
 
         try:
             status = await ble.send_command_by_name(spec.NamedCommand)

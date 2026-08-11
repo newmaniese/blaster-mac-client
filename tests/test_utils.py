@@ -79,6 +79,70 @@ class TestExecuteSpecs(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen, [("Red", "OK:Red")])
 
 
+class TestExecuteSpecsGuards(unittest.IsolatedAsyncioTestCase):
+    async def test_skip_first_delay_only_skips_the_first(self):
+        """The caller already served Idle[0].Delay as the cooldown."""
+        ble = AsyncMock()
+        ble.send_command_by_name.return_value = "OK"
+        specs = [
+            EventSpec(NamedCommand="Green", Delay=120),
+            EventSpec(NamedCommand="Off", Delay=5),
+        ]
+
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            await execute_specs(ble, specs, skip_first_delay=True)
+
+        mock_sleep.assert_awaited_once_with(5)
+        self.assertEqual(ble.send_command_by_name.call_count, 2)
+
+    async def test_still_wanted_false_sends_nothing(self):
+        ble = AsyncMock()
+        specs = [EventSpec(NamedCommand="Green", Delay=0)]
+
+        await execute_specs(ble, specs, still_wanted=lambda: False)
+
+        ble.send_command_by_name.assert_not_called()
+
+    async def test_still_wanted_rechecked_after_delay(self):
+        """A command queued before a wait must not land after the state moved on."""
+        wanted = [True]
+        ble = AsyncMock()
+        ble.send_command_by_name.return_value = "OK"
+
+        async def flip(_delay):
+            wanted[0] = False
+
+        specs = [EventSpec(NamedCommand="Green", Delay=120)]
+        with patch("asyncio.sleep", new=AsyncMock(side_effect=flip)):
+            await execute_specs(ble, specs, still_wanted=lambda: wanted[0])
+
+        ble.send_command_by_name.assert_not_called()
+
+    async def test_still_wanted_abandons_remaining_specs(self):
+        wanted = [True]
+        sent: list[str] = []
+        ble = AsyncMock()
+
+        async def record(name):
+            sent.append(name)
+            return "OK"
+
+        ble.send_command_by_name = AsyncMock(side_effect=record)
+
+        async def flip(_delay):
+            wanted[0] = False
+
+        specs = [
+            EventSpec(NamedCommand="Red", Delay=0),
+            EventSpec(NamedCommand="Off", Delay=5),
+            EventSpec(NamedCommand="On", Delay=0),
+        ]
+        with patch("asyncio.sleep", new=AsyncMock(side_effect=flip)):
+            await execute_specs(ble, specs, still_wanted=lambda: wanted[0])
+
+        self.assertEqual(sent, ["Red"])
+
+
 class TestLogInjectionSanitization(unittest.IsolatedAsyncioTestCase):
     async def test_log_injection_sanitization(self) -> None:
         ble = AsyncMock()
