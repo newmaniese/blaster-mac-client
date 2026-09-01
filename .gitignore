@@ -38,6 +38,7 @@ config.local.yaml
 *.local.yaml
 .env
 .env.*
+.ble-auth-token
 
 # IDE & OS
 .DS_Store

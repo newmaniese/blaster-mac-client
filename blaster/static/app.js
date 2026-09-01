@@ -16,6 +16,7 @@
   const configForm = $("config-form");
   const configMsg = $("config-msg");
   const deviceNameInput = $("device_name_input");
+  const authTokenInput = $("auth_token_input");
   const activityLog = $("activity-log");
   const activityEmpty = $("activity-empty");
 
@@ -225,6 +226,7 @@
   function renderConfig(cfg) {
     configCache = cfg;
     deviceNameInput.value = cfg.ble?.device_name || "";
+    authTokenInput.value = cfg.ble?.auth_token || "";
     renderEventRows("OnConnect", cfg.events?.OnConnect);
     renderEventRows("OnDisconnect", cfg.events?.OnDisconnect);
     renderEventRows("Active", cfg.events?.Active);
@@ -347,7 +349,10 @@
     ev.preventDefault();
     setMsg("Saving…");
     const payload = {
-      ble: { device_name: deviceNameInput.value.trim() },
+      ble: {
+        device_name: deviceNameInput.value.trim(),
+        auth_token: authTokenInput.value.trim(),
+      },
       events: {
         OnConnect: readEventRows("OnConnect"),
         OnDisconnect: readEventRows("OnDisconnect"),

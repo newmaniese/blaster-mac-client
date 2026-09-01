@@ -66,6 +66,12 @@ class AppController:
         specs = self.config.events.OnDisconnect
         return specs[0] if specs else None
 
+    def _connection_error(self) -> str:
+        detail = getattr(self.ble, "last_connection_error", None)
+        if isinstance(detail, str) and detail:
+            return detail
+        return "Could not find or connect to IR Blaster. Ensure it is on and in range."
+
     def _add_event(self, message: str, kind: str = "info") -> None:
         """Append a UI-facing activity event (ring buffer)."""
         self._event_seq += 1
@@ -142,9 +148,7 @@ class AppController:
         self._add_event("Connecting to IR Blaster…", "conn")
         connected = await self.ble.connect()
         if not connected:
-            self._error = (
-                "Could not find or connect to IR Blaster. Ensure it is on and paired."
-            )
+            self._error = self._connection_error()
             logger.error("%s", self._error)
             self._add_event(self._error, "error")
             self._ensure_reconnect_task()
@@ -197,6 +201,11 @@ class AppController:
     async def apply_config(self, data: dict[str, Any]) -> dict[str, Any]:
         """Validate, save config.yaml, and safely restart BLE with new settings."""
         new_config = Config.from_dict(data)
+        # Preserve the existing token when the payload omits ble.auth_token
+        # (older UI clients / partial updates).
+        ble_payload = data.get("ble") if isinstance(data.get("ble"), dict) else None
+        if not ble_payload or "auth_token" not in ble_payload:
+            new_config.ble.auth_token = self.config.ble.auth_token
         async with self._lock:
             new_config.save(self.config_path)
             self.config = new_config
@@ -251,15 +260,18 @@ class AppController:
             logger.info("Connecting to IR Blaster...")
             self._add_event("Connecting to IR Blaster…", "conn")
             if not await self.ble.connect():
-                self._error = (
-                    "Could not find or connect to IR Blaster. Ensure it is on and paired."
-                )
+                self._error = self._connection_error()
                 logger.error("%s", self._error)
                 self._add_event(self._error, "error")
                 self._ensure_reconnect_task()
                 return False
             self._error = None
             quiet_reconnect = await self._run_after_connect()
+            if quiet_reconnect is None:
+                self._error = "BLE link setup failed; reconnecting."
+                await self.ble.reset_connection()
+                self._ensure_reconnect_task()
+                return False
             if self.ble.is_connected:
                 self._add_event("Connected to IR Blaster", "conn")
             self.sm.update(self._av_active)
@@ -271,16 +283,16 @@ class AppController:
         finally:
             self._reconnecting = False
 
-    async def _run_after_connect(self) -> bool:
-        """Arm the link and return True when reconnect commands were suppressed."""
+    async def _run_after_connect(self) -> bool | None:
+        """Arm the link; return quiet-reconnect state, or None on setup failure."""
         try:
             await self.ble.wait_until_ready()
-        except TimeoutError as e:
+        except (BleakError, TimeoutError, RuntimeError) as e:
             logger.warning("%s", sanitize_log_message(e))
-            self._add_event(f"Ready wait timed out: {e}", "error")
-            return False
+            self._add_event(f"BLE link not ready: {e}", "error")
+            return None
         if not self.ble.is_connected:
-            return False
+            return None
 
         try:
             timeout_state = await self.ble.get_disconnect_timeout_state()
@@ -299,7 +311,8 @@ class AppController:
             }
 
         quiet_reconnect = self._disconnect_timeout["state"] == "interrupted"
-        await self._restart_schedule()
+        if not await self._restart_schedule():
+            return None
         if quiet_reconnect:
             remaining = self._disconnect_timeout["remaining_seconds"]
             command = self._disconnect_timeout["command"] or "scheduled command"
@@ -320,19 +333,23 @@ class AppController:
         await self._start_heartbeat()
         return quiet_reconnect
 
-    async def _restart_schedule(self) -> None:
+    async def _restart_schedule(self) -> bool:
         """Configure the device's disconnect-delayed command (countdown starts on disconnect)."""
         spec = self._disconnect0()
-        if spec is not None:
-            try:
-                await self.ble.schedule_disconnect_command(
-                    spec.NamedCommand,
-                    schedule_delay_seconds(spec),
-                )
-            except (BleakError, asyncio.TimeoutError, RuntimeError) as e:
-                logger.warning(
-                    "Schedule disconnect command failed: %s", sanitize_log_message(e)
-                )
+        if spec is None:
+            return True
+        try:
+            await self.ble.schedule_disconnect_command(
+                spec.NamedCommand,
+                schedule_delay_seconds(spec),
+            )
+            return True
+        except (BleakError, asyncio.TimeoutError, RuntimeError) as e:
+            logger.warning(
+                "Schedule disconnect command failed: %s", sanitize_log_message(e)
+            )
+            self._add_event(f"BLE schedule setup failed: {e}", "error")
+            return False
 
     async def _start_heartbeat(self) -> None:
         """Keep the ESP32 GATT-idle watchdog fed while connected."""
@@ -350,6 +367,9 @@ class AppController:
                 await self.ble.send_heartbeat()
             except (BleakError, asyncio.TimeoutError, RuntimeError) as e:
                 logger.warning("Heartbeat failed: %s", sanitize_log_message(e))
+                self._add_event(f"BLE heartbeat failed: {e}", "error")
+                await self.ble.reset_connection()
+                self._ensure_reconnect_task()
                 return
 
     async def _cancel_heartbeat(self) -> None:

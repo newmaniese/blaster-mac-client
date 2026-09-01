@@ -50,6 +50,11 @@
           Device name
           <input type="text" name="device_name" id="device_name_input" required>
         </label>
+        <label>
+          BLE auth token
+          <input type="password" name="auth_token" id="auth_token_input" autocomplete="off" spellcheck="false" minlength="16" maxlength="64" required>
+        </label>
+        <p class="field-help">Must match firmware <code>BLE_AUTH_TOKEN</code> (16–64 characters).</p>
 
         <fieldset>
           <legend>On connect</legend>

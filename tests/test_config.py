@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 
 from blaster.config import (
+    AUTH_TOKEN_ENV,
+    AUTH_TOKEN_FILENAME,
     Config,
     DEFAULT_DEVICE_NAME,
     schedule_delay_seconds,
@@ -135,6 +137,69 @@ def test_load_missing_file_raises() -> None:
         Config.load("/nonexistent/config.yaml")
 
 
+def test_loads_auth_token_from_config_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "ble:\n  device_name: Test\n  auth_token: yaml-token-12345678\n"
+    )
+
+    cfg = Config.load(config_path)
+
+    assert cfg.ble.auth_token == "yaml-token-12345678"
+    assert cfg.to_dict()["ble"]["auth_token"] == "yaml-token-12345678"
+
+
+def test_loads_private_ble_auth_token_file(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("ble: {device_name: Test}\n")
+    (tmp_path / AUTH_TOKEN_FILENAME).write_text("file-token-123456789\n")
+
+    cfg = Config.load(config_path)
+
+    assert cfg.ble.auth_token == "file-token-123456789"
+
+
+def test_config_auth_token_preferred_over_file(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "ble:\n  device_name: Test\n  auth_token: yaml-token-12345678\n"
+    )
+    (tmp_path / AUTH_TOKEN_FILENAME).write_text("file-token-123456789\n")
+
+    cfg = Config.load(config_path)
+
+    assert cfg.ble.auth_token == "yaml-token-12345678"
+
+
+def test_auth_token_environment_takes_precedence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "ble:\n  auth_token: yaml-token-12345678\n"
+    )
+    (tmp_path / AUTH_TOKEN_FILENAME).write_text("file-token-123456789\n")
+    monkeypatch.setenv(AUTH_TOKEN_ENV, "environment-token-123456")
+
+    cfg = Config.load(config_path)
+
+    assert cfg.ble.auth_token == "environment-token-123456"
+
+
+def test_rejects_short_auth_token_in_config() -> None:
+    with pytest.raises(ValueError, match="16–64"):
+        Config.from_dict({"ble": {"auth_token": "too-short"}})
+
+
+def test_rejects_short_auth_token_file(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("{}\n")
+    (tmp_path / AUTH_TOKEN_FILENAME).write_text("too-short\n")
+
+    with pytest.raises(ValueError, match="16–64"):
+        Config.load(config_path)
+
+
 def test_negative_delay_validation() -> None:
     """Ensure that negative Delay raises ValueError."""
     data = {
@@ -237,7 +302,10 @@ def test_to_dict_round_trip() -> None:
 def test_save_and_load_file(tmp_path: Path) -> None:
     path = tmp_path / "config.yaml"
     cfg = Config.from_dict({
-        "ble": {"device_name": "Saved"},
+        "ble": {
+            "device_name": "Saved",
+            "auth_token": "saved-token-123456",
+        },
         "events": {
             "Idle": [{"NamedCommand": "Green", "Delay": 15}],
         },
@@ -245,5 +313,6 @@ def test_save_and_load_file(tmp_path: Path) -> None:
     cfg.save(path)
     loaded = Config.load(path)
     assert loaded.ble.device_name == "Saved"
+    assert loaded.ble.auth_token == "saved-token-123456"
     assert loaded.events.Idle[0].Delay == 15
     assert loaded.events.Active[0].NamedCommand == "Red"

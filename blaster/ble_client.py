@@ -5,6 +5,7 @@ schedule/disconnect schedule, auto-reconnect (bleak).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -22,15 +23,39 @@ CHAR_SAVED_UUID = "e97a0002-c116-4a63-a60f-0e9b4d3648f3"
 CHAR_SEND_UUID = "e97a0003-c116-4a63-a60f-0e9b4d3648f3"
 CHAR_STATUS_UUID = "e97a0004-c116-4a63-a60f-0e9b4d3648f3"
 CHAR_SCHEDULE_UUID = "e97a0005-c116-4a63-a60f-0e9b4d3648f3"
+CHAR_AUTH_UUID = "e97a0006-c116-4a63-a60f-0e9b4d3648f3"
 
 logger = logging.getLogger(__name__)
 
 # Bleak's own scan timeout; macOS CoreBluetooth can ignore it when the stack is wedged.
 SCAN_TIMEOUT_SECONDS = 10.0
-# Hard ceiling around discover so a hung scanner cannot block reconnect for minutes.
+# Hard ceiling around discovery so a wedged scanner cannot block reconnect.
 SCAN_HARD_TIMEOUT_SECONDS = 15.0
 # Hard ceiling around BleakClient.connect for the same reason.
 CONNECT_HARD_TIMEOUT_SECONDS = 20.0
+DISCONNECT_CLEANUP_TIMEOUT_SECONDS = 5.0
+CACHED_DEVICE_FAILURE_LIMIT = 3
+# The token write is the first GATT operation on a fresh link and races the
+# pairing handshake, so it is retried until encryption is up.
+AUTH_ENCRYPTION_TIMEOUT_SECONDS = 20.0
+AUTH_RETRY_INTERVAL_SECONDS = 1.0
+
+# ATT error codes and CoreBluetooth messages that mean "the link is not secure
+# yet", as opposed to a permanent refusal.
+_ENCRYPTION_PENDING_ATT_CODES = frozenset({0x05, 0x08, 0x0F})
+_ENCRYPTION_PENDING_MESSAGES = (
+    "insufficient encryption",
+    "insufficient authentication",
+    "insufficient authorization",
+)
+
+
+def _is_encryption_pending(error: BaseException) -> bool:
+    args = getattr(error, "args", ())
+    if args and isinstance(args[0], int) and args[0] in _ENCRYPTION_PENDING_ATT_CODES:
+        return True
+    text = str(error).lower()
+    return any(message in text for message in _ENCRYPTION_PENDING_MESSAGES)
 
 
 class DisconnectTimeoutState(TypedDict):
@@ -47,13 +72,19 @@ async def find_device(config: BLEConfig) -> BLEDevice | None:
     which on macOS is a CoreBluetooth cache that keeps reporting the previous
     name after the device is renamed.
 
-    A hard asyncio timeout wraps BleakScanner.discover so a wedged Bluetooth
+    A hard asyncio timeout wraps the scanner so a wedged Bluetooth
     stack cannot hang the reconnect loop for tens of minutes.
     """
     logger.info("Scanning for BLE device %s...", config.device_name)
     try:
-        discovered = await asyncio.wait_for(
-            BleakScanner.discover(timeout=SCAN_TIMEOUT_SECONDS, return_adv=True),
+        device = await asyncio.wait_for(
+            BleakScanner.find_device_by_filter(
+                lambda _device, adv: bool(
+                    adv.local_name
+                    and config.device_name.lower() == adv.local_name.lower()
+                ),
+                timeout=SCAN_TIMEOUT_SECONDS,
+            ),
             timeout=SCAN_HARD_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:
@@ -63,11 +94,13 @@ async def find_device(config: BLEConfig) -> BLEDevice | None:
             sanitize_log_message(config.device_name),
         )
         return None
-    for device, adv in discovered.values():
-        local_name = adv.local_name
-        if local_name and config.device_name.lower() == local_name.lower():
-            logger.info("Found %s at %s", sanitize_log_message(local_name), device.address)
-            return device
+    if device is not None:
+        logger.info(
+            "Found %s at %s",
+            sanitize_log_message(config.device_name),
+            device.address,
+        )
+        return device
     logger.warning("Device %s not found", sanitize_log_message(config.device_name))
     return None
 
@@ -84,10 +117,18 @@ class IRBlasterBLE:
         self._device: BLEDevice | None = None
         self._on_disconnect: Callable[[], Awaitable[None]] | None = None
         self._name_to_index: dict[str, int] | None = None  # cache; None = invalid
+        self._connecting = False
+        self._suppress_disconnect_callback = False
+        self._cached_device_failures = 0
+        self.last_connection_error: str | None = None
 
     @property
     def is_connected(self) -> bool:
-        return self._client is not None and self._client.is_connected
+        return (
+            self._client is not None
+            and self._client.is_connected
+            and not self._connecting
+        )
 
     def _ensure_connected(self) -> None:
         if not self.is_connected:
@@ -95,40 +136,131 @@ class IRBlasterBLE:
 
     async def connect(self) -> bool:
         """Discover device and connect. Returns True if connected."""
-        if self._client and self._client.is_connected:
+        if self.is_connected:
             return True
-        device = await find_device(self._config)
+        if not self._config.auth_token:
+            self.last_connection_error = (
+                "BLE auth token is not configured. Set ble.auth_token in "
+                "config.yaml to the same BLE_AUTH_TOKEN used by the firmware."
+            )
+            logger.error("%s", self.last_connection_error)
+            return False
+
+        device = self._device
+        if device is None:
+            device = await find_device(self._config)
         if not device:
+            self.last_connection_error = f"Device {self._config.device_name} not found"
             return False
         self._device = device
-        self._client = BleakClient(device, disconnected_callback=self._handle_disconnect)
+        client = BleakClient(device, disconnected_callback=self._handle_disconnect)
+        self._client = client
+        self._connecting = True
         try:
             await asyncio.wait_for(
-                self._client.connect(),
+                client.connect(),
                 timeout=CONNECT_HARD_TIMEOUT_SECONDS,
             )
+            await self._authenticate(client)
+            if not client.is_connected:
+                raise RuntimeError("BLE link dropped while authenticating")
+            self._cached_device_failures = 0
+            self.last_connection_error = None
             self._name_to_index = None  # refresh saved codes on next use
             logger.info(
                 "Connected to %s", sanitize_log_message(device.name or device.address)
             )
             return True
         except asyncio.TimeoutError:
+            self.last_connection_error = (
+                f"BLE connect timed out after {CONNECT_HARD_TIMEOUT_SECONDS:.0f}s"
+            )
             logger.error(
-                "BLE connect timed out after %.0fs to %s",
-                CONNECT_HARD_TIMEOUT_SECONDS,
+                "%s to %s",
+                self.last_connection_error,
                 sanitize_log_message(device.name or device.address),
             )
-            self._client = None
-            self._device = None
+            await self._discard_failed_client(client)
             return False
         except Exception as e:
-            logger.exception("Connect failed: %s", sanitize_log_message(e))
-            self._client = None
-            self._device = None
+            message = str(e)
+            if "Peer removed pairing information" in message:
+                self.last_connection_error = (
+                    "macOS has a stale BLE bond. Forget this device once in "
+                    "System Settings → Bluetooth; the new firmware will not bond again."
+                )
+            else:
+                self.last_connection_error = f"Connect failed: {message}"
+            logger.exception("%s", sanitize_log_message(self.last_connection_error))
+            await self._discard_failed_client(client)
             return False
+        finally:
+            self._connecting = False
 
-    def _handle_disconnect(self, _client: BleakClient) -> None:
+    async def _authenticate(self, client: BleakClient) -> None:
+        """
+        Authorize the connection by writing the shared token.
+
+        Every characteristic requires encryption, and macOS pairs lazily: the
+        first write is answered with an insufficient-encryption error while
+        CoreBluetooth completes the handshake in the background. Retry until the
+        link is secure rather than treating that first error as a failed connect.
+        """
+        token = self._config.auth_token.encode("utf-8")
+        await self._write_auth_token(client, token)
+        response = bytes(await client.read_gatt_char(CHAR_AUTH_UUID))
+        if response != b"OK":
+            raise PermissionError("BLE authentication token was rejected")
+
+    async def _write_auth_token(self, client: BleakClient, token: bytes) -> None:
+        deadline = time.monotonic() + AUTH_ENCRYPTION_TIMEOUT_SECONDS
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                await client.write_gatt_char(CHAR_AUTH_UUID, token, response=True)
+                return
+            except Exception as e:
+                if not _is_encryption_pending(e) or not client.is_connected:
+                    raise
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(
+                        "BLE link was not encrypted after "
+                        f"{AUTH_ENCRYPTION_TIMEOUT_SECONDS:.0f}s "
+                        f"({e}). If this persists, forget the device in "
+                        "System Settings → Bluetooth and try again."
+                    ) from e
+                logger.debug(
+                    "Auth write attempt %s waiting on encryption: %s",
+                    attempt,
+                    sanitize_log_message(e),
+                )
+                await asyncio.sleep(AUTH_RETRY_INTERVAL_SECONDS)
+
+    async def _discard_failed_client(self, client: BleakClient) -> None:
+        self._name_to_index = None
+        if client.is_connected:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(
+                    client.disconnect(),
+                    timeout=DISCONNECT_CLEANUP_TIMEOUT_SECONDS,
+                )
+        if self._client is client:
+            self._client = None
+        self._cached_device_failures += 1
+        if self._cached_device_failures >= CACHED_DEVICE_FAILURE_LIMIT:
+            self._device = None
+            self._cached_device_failures = 0
+
+    def _handle_disconnect(self, client: BleakClient) -> None:
+        if client is not self._client:
+            logger.debug("Ignoring disconnect from superseded BLE client")
+            return
         logger.warning("BLE disconnected")
+        self._client = None
+        self._name_to_index = None
+        if self._connecting or self._suppress_disconnect_callback:
+            return
         if self._on_disconnect:
             asyncio.create_task(self._on_disconnect())
 
@@ -137,10 +269,24 @@ class IRBlasterBLE:
 
     async def disconnect(self) -> None:
         self._on_disconnect = None
-        if self._client and self._client.is_connected:
-            await self._client.disconnect()
-        self._client = None
+        await self.reset_connection()
         self._device = None
+
+    async def reset_connection(self) -> None:
+        """Drop the current link but retain discovery state and reconnect callback."""
+        client = self._client
+        if client and client.is_connected:
+            self._suppress_disconnect_callback = True
+            try:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(
+                        client.disconnect(),
+                        timeout=DISCONNECT_CLEANUP_TIMEOUT_SECONDS,
+                    )
+            finally:
+                self._suppress_disconnect_callback = False
+        if self._client is client:
+            self._client = None
         self._name_to_index = None
 
     async def wait_until_ready(self, timeout_seconds: float = 30.0) -> None:

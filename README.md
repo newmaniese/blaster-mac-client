@@ -41,13 +41,13 @@ sequenceDiagram
 
 - **Camera/mic detection:** Uses macOS `log stream` with the same control-center “sensor-indicators” events that drive the menu bar dots. No polling; events only when state changes. Control Center emits two different message shapes across macOS releases (`Active activity attributions changed to …` and `Sorted active attributions from SystemStatus update: …`) and both are recognized.
 - **State machine:** IDLE → ACTIVE (cam or mic on) → COOLDOWN (both off) → IDLE after the Idle cooldown. The client sends the **Active** command (e.g. Red) when entering ACTIVE and the **Idle** command (e.g. Green) when returning to IDLE. A command with a `Delay` is dropped if cam/mic state changes while it waits, so a late send cannot leave the wrong color showing.
-- **BLE:** Scans for the configured device name in the **advertised** BLE local name, reads Saved Codes to resolve command **names** to indices, and sends commands by name. On reconnect it first reads the ESP32’s disconnect-timeout snapshot, which the device parks in the Status characteristic at connect time (read before the first send, since a send overwrites Status with the command result). If the reconnect canceled a running timeout, it quietly re-arms the schedule without sending light commands. Otherwise it runs all **OnConnect** commands and delays, then runs **Active** if the camera or mic is on. While connected it sends Schedule heartbeats every 60s so the ESP32’s GATT-idle watchdog does not drop a healthy idle link. It retries automatically if the device is missing or the link drops.
+- **BLE:** Finds the configured advertised name, establishes an encrypted non-bonded session, and authorizes it with a shared token. Reconnect first tries the cached CoreBluetooth peripheral and scans again only after repeated failures. This avoids stale bond keys—the recurring cause of macOS `CBErrorDomain Code=14`. The client then reads the disconnect-timeout snapshot, restores commands as needed, and sends a heartbeat every 60 seconds.
 
 ## Requirements
 
 - macOS (tested on Sonoma / Sequoia) with Bluetooth
 - Python 3.10+ (bundled by the installer into a local venv)
-- [ESP32-C3 IR Blaster](https://github.com/newmaniese/ESP-BlasterHub) firmware with BLE enabled, powered on, and **paired** with this Mac (default firmware uses Just Works — no passkey)
+- [ESP32-C3 IR Blaster](https://github.com/newmaniese/ESP-BlasterHub) firmware with token-authorized, non-bonded BLE enabled
 
 ## Install from a release
 
@@ -72,7 +72,10 @@ Logs (rotated): `~/Library/Logs/blaster-mac-client/blaster.log` (and `blaster.lo
 
 After installing you can delete the unzipped folder. To remove the installed app: run `./uninstall.sh` from a copy of the project, or see [Uninstall](#uninstall).
 
-Pair the IR Blaster once (this app or nRF Connect). With default firmware no passkey is required. If the light never responds, check **System Settings → Privacy & Security → Bluetooth** and allow `blaster-mac-client`.
+Before installing, set `ble.auth_token` in `config.yaml` to the firmware's
+`BLE_AUTH_TOKEN` (16–64 characters). The installer copies and preserves
+`config.yaml` in the install directory. A legacy `.ble-auth-token` file beside
+the config is still accepted if `ble.auth_token` is empty.
 
 ## Management UI
 
@@ -82,7 +85,7 @@ While the app is running, open **[http://127.0.0.1:8765](http://127.0.0.1:8765)*
 |---------|-----------------|
 | **Status** | Connection state, configured device name, state machine (idle / active / cooldown), camera and mic on/off, the ESP32 timeout snapshot from the last connection, last command / light color, and any error message. |
 | **Controls** | **Reconnect** to the BLE device. Buttons for each saved IR command on the connected blaster (loaded from the device). |
-| **Configuration** | Edit device name and event commands, then **Save & apply**. |
+| **Configuration** | Edit device name, BLE auth token, and event commands, then **Save & apply**. |
 
 Saving config writes `config.yaml` next to the running install and safely restarts the BLE session with the new settings. You do **not** need to reload the LaunchAgent for config changes.
 
@@ -102,6 +105,7 @@ All commands are specified by **name**. The client resolves names to indices usi
 ```yaml
 ble:
   device_name: "IR Blaster"
+  auth_token: "your-firmware-BLE_AUTH_TOKEN"
 
 events:
   OnConnect:
@@ -125,6 +129,7 @@ Every event is a **list** of `{ NamedCommand, Delay? }`. Commands run in order; 
 | Field / event | Description |
 |---------------|-------------|
 | **`ble.device_name`** | Exact BLE advertised name to connect to (case-insensitive). Must match the firmware `BLE_DEVICE_NAME` (and what System Settings → Bluetooth shows). |
+| **`ble.auth_token`** | Shared token matching firmware `BLE_AUTH_TOKEN` (16–64 characters). Optional overrides: `BLASTER_AUTH_TOKEN` env, or a legacy `.ble-auth-token` file beside `config.yaml`. |
 | **OnConnect** | Commands when the client connects, in order. |
 | **OnDisconnect** | First item only: ESP32 runs `NamedCommand` `Delay` seconds after BLE disconnect; reconnect cancels the countdown. Default delay is 900s if unset/`0`. |
 | **Active** | Commands when camera or mic turns on (e.g. `"Red"`). |
@@ -198,13 +203,16 @@ Logs under `~/Library/Logs/blaster-mac-client` are left in place.
 ## Troubleshooting
 
 - **“Could not find or connect to IR Blaster” / device not found**  
-  Ensure the blaster is powered, in range, and paired. Confirm `ble.device_name` matches the name in **System Settings → Bluetooth** (and the firmware `BLE_DEVICE_NAME`). Grant Bluetooth access under **Privacy & Security → Bluetooth** for the app that owns the process (for the LaunchAgent install, allow `blaster-mac-client`).
+  Ensure the blaster is powered and in range. Confirm `ble.device_name` matches firmware `BLE_DEVICE_NAME`, `ble.auth_token` matches firmware `BLE_AUTH_TOKEN`, and Bluetooth access is allowed under **Privacy & Security → Bluetooth**.
+
+- **“Peer removed pairing information”**
+  Forget the blaster once in **System Settings → Bluetooth** when migrating from older bonded firmware. Current firmware creates a fresh encrypted, non-bonded session on every connection, so stale bonds do not recur.
 
 - **Device renamed but the app still can’t find it**  
   Update **Device name** in the management UI (or `config.yaml`) to the new advertised name and Save & apply. Current builds match the advertisement, so a stale macOS cache alone should not block discovery.
 
 - **macOS Bluetooth menu doesn’t list the blaster**  
-  Custom BLE GATT servers often do not appear as classic Bluetooth accessories. Use this app (or nRF Connect) to connect; after pairing once, reconnection is automatic.
+  Custom BLE GATT servers often do not appear as classic Bluetooth accessories. Use this app (or nRF Connect) to connect.
 
 - **Camera/mic state not updating**  
   The app uses `log stream` with `com.apple.controlcenter` / `sensor-indicators`. On older macOS the predicate or message format may differ; run `blaster/av_monitor.py` as a script to print initial state and live events.

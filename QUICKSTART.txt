@@ -11,7 +11,10 @@ Blaster Mac Client — run on this Mac
 4. Go into the folder:
    cd blaster-mac-client
 
-5. Install it to run at login:
+5. Set ble.auth_token in config.yaml to the same BLE_AUTH_TOKEN as the firmware
+   (16–64 characters). You can also set it later in the management UI.
+
+6. Install it to run at login:
    chmod +x install.sh && ./install.sh
 
    This copies the app to:
@@ -22,7 +25,8 @@ Blaster Mac Client — run on this Mac
    Management UI: http://127.0.0.1:8765
      • Status (connection, cam/mic, last command)
      • Reconnect and send saved IR commands
-     • Edit device name and OnConnect / OnDisconnect / Active / Idle, then Save & apply
+     • Edit device name, BLE auth token, and OnConnect / OnDisconnect /
+       Active / Idle, then Save & apply
 
    Logs: ~/Library/Logs/blaster-mac-client/blaster.log (rotated)
    Debug: BLASTER_LOG_LEVEL=DEBUG or python -m blaster --log-level DEBUG
@@ -37,6 +41,6 @@ To remove: ./uninstall.sh   (or, if you deleted this folder:
 Just want to try it once, without installing?
    chmod +x run.sh && ./run.sh      (Ctrl+C to stop)
 
-Requirements: macOS with Bluetooth; IR Blaster powered, in range, and paired
-with this Mac. Device name in config must match the BLE advertised name
-(System Settings → Bluetooth / firmware BLE_DEVICE_NAME).
+Requirements: macOS with Bluetooth; IR Blaster powered and in range. Device
+name in config must match firmware BLE_DEVICE_NAME, and ble.auth_token must
+match firmware BLE_AUTH_TOKEN.

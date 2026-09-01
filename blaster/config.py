@@ -3,6 +3,7 @@ Load and validate config.yaml with defaults.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,8 @@ from typing import Any
 import yaml
 
 DEFAULT_DEVICE_NAME = "IR Blaster"
+AUTH_TOKEN_ENV = "BLASTER_AUTH_TOKEN"
+AUTH_TOKEN_FILENAME = ".ble-auth-token"
 
 # Event defaults (NamedCommand, Delay)
 DEFAULT_ON_CONNECT = ("On", 0)
@@ -24,6 +27,7 @@ DEFAULT_SCHEDULE_DELAY_SECONDS = 900
 @dataclass
 class BLEConfig:
     device_name: str
+    auth_token: str = ""
 
 
 @dataclass
@@ -53,7 +57,11 @@ class Config:
             path = _default_config_path()
         with open(path, "r") as f:
             data = yaml.safe_load(f) or {}
-        return cls.from_dict(data)
+        config = cls.from_dict(data)
+        config.ble.auth_token = _resolve_auth_token(
+            Path(path), config_token=config.ble.auth_token
+        )
+        return config
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Config:
@@ -67,9 +75,13 @@ class Config:
             Idle=_parse_event_specs(events_data, "Idle", DEFAULT_IDLE),
         )
 
+        auth_token = str(ble_data.get("auth_token") or "").strip()
+        _validate_auth_token(auth_token)
+
         return cls(
             ble=BLEConfig(
                 device_name=ble_data.get("device_name") or DEFAULT_DEVICE_NAME,
+                auth_token=auth_token,
             ),
             events=events,
         )
@@ -77,7 +89,10 @@ class Config:
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a dict suitable for YAML / JSON round-trip."""
         return {
-            "ble": {"device_name": self.ble.device_name},
+            "ble": {
+                "device_name": self.ble.device_name,
+                "auth_token": self.ble.auth_token,
+            },
             "events": {
                 "OnConnect": [_spec_to_dict(s) for s in self.events.OnConnect],
                 "OnDisconnect": [_spec_to_dict(s) for s in self.events.OnDisconnect],
@@ -151,6 +166,24 @@ def _spec_to_dict(spec: EventSpec) -> dict[str, Any]:
     if spec.Delay is not None:
         out["Delay"] = spec.Delay
     return out
+
+
+def _validate_auth_token(token: str) -> None:
+    if token and not 16 <= len(token) <= 64:
+        raise ValueError("BLE auth token must be 16–64 characters")
+
+
+def _resolve_auth_token(config_path: Path, config_token: str = "") -> str:
+    """Resolve token: BLASTER_AUTH_TOKEN > config.yaml > .ble-auth-token."""
+    token = os.environ.get(AUTH_TOKEN_ENV, "").strip()
+    if not token:
+        token = (config_token or "").strip()
+    if not token:
+        token_path = config_path.resolve().parent / AUTH_TOKEN_FILENAME
+        if token_path.is_file():
+            token = token_path.read_text(encoding="utf-8").strip()
+    _validate_auth_token(token)
+    return token
 
 
 def default_config_path() -> Path:

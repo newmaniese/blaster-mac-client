@@ -1,5 +1,7 @@
 ble:
   device_name: IR Blaster
+  # Same value as firmware BLE_AUTH_TOKEN (16–64 characters).
+  auth_token: ''
 events:
   OnConnect:
   - NamedCommand: 'On'

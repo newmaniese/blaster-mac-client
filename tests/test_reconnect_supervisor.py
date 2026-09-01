@@ -43,6 +43,7 @@ def _mock_ble(connected: list[bool]) -> MagicMock:
     ble.schedule_disconnect_command = AsyncMock()
     ble.send_heartbeat = AsyncMock()
     ble.disconnect = AsyncMock()
+    ble.reset_connection = AsyncMock()
     ble.send_command_by_name = AsyncMock(return_value="OK:test")
     ble.set_disconnect_callback = MagicMock()
     type(ble).is_connected = property(lambda self: connected[0])
@@ -82,6 +83,81 @@ async def test_drop_while_arming_reports_failure(minimal_config: Path) -> None:
             ctrl._running = False
             await ctrl._cancel_reconnect()
             await ctrl._cancel_heartbeat()
+
+
+@pytest.mark.asyncio
+async def test_ready_timeout_drops_partial_connection(minimal_config: Path) -> None:
+    """A transport link that never becomes GATT-ready must be retried."""
+    from blaster.app import AppController
+
+    connected = [True]
+    ble = _mock_ble(connected)
+    ble.connect = AsyncMock(return_value=True)
+    ble.wait_until_ready = AsyncMock(side_effect=TimeoutError("not ready"))
+
+    with (
+        patch("blaster.app.IRBlasterBLE", return_value=ble),
+        patch("blaster.app.get_initial_state", return_value=(False, False)),
+        patch("blaster.app.stream_av_events", return_value=_never_yield()),
+    ):
+        ctrl = AppController(minimal_config)
+        ctrl._running = True
+        try:
+            assert await ctrl._connect_and_arm_locked() is False
+            ble.reset_connection.assert_awaited_once()
+            assert ctrl._reconnect_task is not None
+        finally:
+            ctrl._running = False
+            await ctrl._cancel_reconnect()
+
+
+@pytest.mark.asyncio
+async def test_schedule_failure_drops_partial_connection(minimal_config: Path) -> None:
+    """Reconnect is incomplete until the disconnect safety schedule is armed."""
+    from blaster.app import AppController
+
+    connected = [True]
+    ble = _mock_ble(connected)
+    ble.connect = AsyncMock(return_value=True)
+    ble.schedule_disconnect_command = AsyncMock(side_effect=RuntimeError("write failed"))
+
+    with (
+        patch("blaster.app.IRBlasterBLE", return_value=ble),
+        patch("blaster.app.get_initial_state", return_value=(False, False)),
+        patch("blaster.app.stream_av_events", return_value=_never_yield()),
+    ):
+        ctrl = AppController(minimal_config)
+        ctrl._running = True
+        try:
+            assert await ctrl._connect_and_arm_locked() is False
+            ble.reset_connection.assert_awaited_once()
+        finally:
+            ctrl._running = False
+            await ctrl._cancel_reconnect()
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_failure_forces_reconnect(minimal_config: Path) -> None:
+    """A dead GATT link must not remain transport-connected indefinitely."""
+    from blaster.app import AppController
+
+    connected = [True]
+    ble = _mock_ble(connected)
+    ble.send_heartbeat = AsyncMock(side_effect=RuntimeError("write failed"))
+
+    with (
+        patch("blaster.app.IRBlasterBLE", return_value=ble),
+        patch("blaster.app.HEARTBEAT_INTERVAL_SECONDS", 0),
+    ):
+        ctrl = AppController(minimal_config)
+        ctrl._running = True
+        try:
+            await ctrl._heartbeat_loop()
+            ble.reset_connection.assert_awaited_once()
+            assert ctrl._reconnect_task is not None
+        finally:
+            ctrl._running = False
+            await ctrl._cancel_reconnect()
 
 
 @pytest.mark.asyncio

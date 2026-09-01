@@ -43,12 +43,28 @@ rsync -a --delete \
 	--exclude '.pytest_cache/' \
 	--exclude '.DS_Store' \
 	--exclude 'config.yaml' \
+	--exclude '.ble-auth-token' \
 	"$SRC_DIR/" "$INSTALL_DIR/"
 
 if [[ -f "$INSTALL_DIR/config.yaml" ]]; then
   echo "Keeping existing config: $INSTALL_DIR/config.yaml"
 else
   cp "$SRC_DIR/config.yaml" "$INSTALL_DIR/config.yaml"
+fi
+
+# Legacy fallback: copy .ble-auth-token if present (prefer ble.auth_token in config.yaml).
+if [[ -f "$INSTALL_DIR/.ble-auth-token" ]]; then
+  echo "Keeping existing legacy .ble-auth-token"
+elif [[ -f "$SRC_DIR/.ble-auth-token" ]]; then
+  cp "$SRC_DIR/.ble-auth-token" "$INSTALL_DIR/.ble-auth-token"
+  chmod 600 "$INSTALL_DIR/.ble-auth-token"
+  echo "Installed legacy .ble-auth-token"
+fi
+
+# Rough check: auth_token line present with a non-empty value (not '' / "").
+if [[ ! -f "$INSTALL_DIR/.ble-auth-token" ]] \
+  && ! grep -E '^[[:space:]]*auth_token:[[:space:]]*[^[:space:]'\''"]+' "$INSTALL_DIR/config.yaml" >/dev/null; then
+  echo "Warning: set ble.auth_token in config.yaml (same as firmware BLE_AUTH_TOKEN)" >&2
 fi
 
 # Build the venv here, in the interactive shell: launchd starts the agent with a minimal
